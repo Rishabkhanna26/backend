@@ -1,0 +1,6 @@
+node_modules
+.next
+.env
+storage/.wwebjs_auth
+storage/.wwebjs_cache
+storage/uploads
