@@ -7855,10 +7855,17 @@ const handleIncomingMessage = async ({
        =============================== */
     if (user.step === "PRODUCT_ORDER_EXTRA_CONFIRM") {
       const choiceNumber = extractNumber(lower);
+      const directSpecificMatch = findBestSpecificCatalogMatch({
+        input: messageText,
+        automation,
+      });
+      const directAddType = inferOrderExtraCatalogType(messageText);
       const wantsAdd =
         choiceNumber === "1" ||
         YES_KEYWORDS.includes(lower) ||
-        lower.includes("add");
+        lower.includes("add") ||
+        Boolean(directSpecificMatch) ||
+        Boolean(directAddType);
       const wantsSkip =
         choiceNumber === "2" ||
         lower === "no" ||
@@ -7866,25 +7873,34 @@ const handleIncomingMessage = async ({
         lower.includes("nothing else");
 
       if (wantsAdd) {
-        await delay(500);
-        await sendMessage(ORDER_EXTRA_DETAILS_PROMPT);
-        user.step = "PRODUCT_ORDER_EXTRA_DETAILS";
-        return;
+        const explicitYesReply =
+          choiceNumber === "1" || YES_KEYWORDS.includes(lower) || lower.includes("add");
+        if (!explicitYesReply) {
+          user.step = "PRODUCT_ORDER_EXTRA_DETAILS";
+        } else {
+          await delay(500);
+          await sendMessage(ORDER_EXTRA_DETAILS_PROMPT);
+          user.step = "PRODUCT_ORDER_EXTRA_DETAILS";
+          return;
+        }
       }
 
-      if (!wantsSkip) {
+      if (user.step !== "PRODUCT_ORDER_EXTRA_DETAILS" && !wantsSkip) {
+        await delay(500);
         await sendMessage(ORDER_EXTRA_PROMPT);
         return;
       }
 
-      delete user.data.orderExtraRequest;
-      delete user.data.pendingOrderExtraItem;
-      delete user.data.pendingOrderExtraType;
-      updateOrderFreeDeliveryContext({ user, adminProfile });
-      await delay(500);
-      await sendMessage(buildPaymentMethodPrompt(user));
-      user.step = "PRODUCT_PAYMENT_METHOD";
-      return;
+      if (user.step === "PRODUCT_ORDER_EXTRA_CONFIRM") {
+        delete user.data.orderExtraRequest;
+        delete user.data.pendingOrderExtraItem;
+        delete user.data.pendingOrderExtraType;
+        updateOrderFreeDeliveryContext({ user, adminProfile });
+        await delay(500);
+        await sendMessage(buildPaymentMethodPrompt(user));
+        user.step = "PRODUCT_PAYMENT_METHOD";
+        return;
+      }
     }
 
     if (user.step === "PRODUCT_ORDER_EXTRA_DETAILS") {
