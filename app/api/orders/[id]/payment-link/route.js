@@ -17,9 +17,7 @@ import {
 export const runtime = 'nodejs';
 
 const WHATSAPP_API_BASE =
-  process.env.WHATSAPP_API_BASE ||
-  process.env.NEXT_PUBLIC_WHATSAPP_API_BASE ||
-  'http://localhost:3001';
+  process.env.WHATSAPP_API_BASE || 'http://localhost:3001';
 const BACKEND_TOKEN_TTL_SECONDS = 10 * 60;
 
 const toTrimmed = (value) => String(value || '').trim();
