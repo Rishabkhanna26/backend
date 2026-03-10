@@ -1,25 +1,16 @@
 import { NextResponse } from 'next/server';
-import nodemailer from 'nodemailer';
 import crypto from 'crypto';
 import { getConnection } from '../../../../lib/db-helpers';
 import { consumeRateLimit, getClientIp } from '../../../../lib/rate-limit';
+import { buildGmailTransporterFromEnv, normalizeSmtpEmail } from '../../../../lib/mailer.js';
 
 export const runtime = 'nodejs';
 
-const SMTP_EMAIL = process.env.SMTP_EMAIL || '';
-const SMTP_PASSWORD = process.env.SMTP_PASSWORD || '';
 const FORGOT_WINDOW_MS = 15 * 60 * 1000;
 const FORGOT_MAX_ATTEMPTS = 6;
 
 function buildTransporter() {
-  if (!SMTP_EMAIL || !SMTP_PASSWORD) return null;
-  return nodemailer.createTransport({
-    service: 'gmail',
-    auth: {
-      user: SMTP_EMAIL,
-      pass: SMTP_PASSWORD,
-    },
-  });
+  return buildGmailTransporterFromEnv();
 }
 
 function createTempPassword() {
@@ -113,8 +104,9 @@ export async function POST(request) {
         [tokenHash, expiresAt.toISOString(), user.id]
       );
 
+      const smtpFrom = normalizeSmtpEmail(process.env.SMTP_EMAIL);
       await transporter.sendMail({
-        from: SMTP_EMAIL,
+        from: smtpFrom || undefined,
         to: user.email,
         subject: 'AlgoChat Password Reset',
         text: `Your temporary password is: ${tempPassword}\n\nIt will expire in 15 minutes.`,

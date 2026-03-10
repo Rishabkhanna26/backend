@@ -10,8 +10,14 @@ const encodeState = (value) =>
 
 export async function GET(request) {
   const clientId = process.env.GOOGLE_CLIENT_ID;
+  const configuredRedirectUri = String(process.env.GOOGLE_REDIRECT_URI || '').trim();
+  const frontendUrl = String(process.env.FRONTEND_URL || process.env.FRONTEND_ORIGIN || '').trim();
+  const inferredRedirectUri = frontendUrl
+    ? new URL('/api/auth/google/callback', frontendUrl).toString()
+    : '';
   const redirectUri =
-    process.env.GOOGLE_REDIRECT_URI ||
+    configuredRedirectUri ||
+    inferredRedirectUri ||
     new URL('/api/auth/google/callback', request.url).toString();
 
   if (!clientId || !redirectUri) {

@@ -1,15 +1,13 @@
 import { NextResponse } from 'next/server';
 import crypto from 'crypto';
-import nodemailer from 'nodemailer';
 import { getConnection } from '../../../../lib/db-helpers';
 import { hashPassword, signAuthToken } from '../../../../lib/auth';
 import { sanitizeEmail, sanitizeNameUpper, sanitizePhone, sanitizeText } from '../../../../lib/sanitize.js';
 import { consumeRateLimit, getClientIp } from '../../../../lib/rate-limit';
+import { buildGmailTransporterFromEnv, normalizeSmtpEmail } from '../../../../lib/mailer.js';
 
 export const runtime = 'nodejs';
 
-const SMTP_EMAIL = process.env.SMTP_EMAIL || '';
-const SMTP_PASSWORD = process.env.SMTP_PASSWORD || '';
 const SIGNUP_CODE_TTL_MINUTES = 10;
 const MAX_CODE_ATTEMPTS = 5;
 const OTP_LENGTH = 6;
@@ -19,14 +17,7 @@ const SIGNUP_VERIFY_WINDOW_MS = 15 * 60 * 1000;
 const SIGNUP_VERIFY_MAX_ATTEMPTS = 20;
 
 function buildTransporter() {
-  if (!SMTP_EMAIL || !SMTP_PASSWORD) return null;
-  return nodemailer.createTransport({
-    service: 'gmail',
-    auth: {
-      user: SMTP_EMAIL,
-      pass: SMTP_PASSWORD,
-    },
-  });
+  return buildGmailTransporterFromEnv();
 }
 
 function normalizeSignupPayload(body) {
@@ -395,9 +386,10 @@ export async function POST(request) {
 
         const transporter = buildTransporter();
         if (transporter) {
+          const smtpFrom = normalizeSmtpEmail(process.env.SMTP_EMAIL);
           const loginUrl = new URL(
             '/login',
-            process.env.FRONTEND_URL || request.url
+            process.env.FRONTEND_URL || process.env.FRONTEND_ORIGIN || request.url
           ).toString();
           const welcomeMail = buildWelcomeEmail({
             name: createdAdmin.name,
@@ -409,7 +401,7 @@ export async function POST(request) {
           });
           try {
             await transporter.sendMail({
-              from: `"AlgoChat CRM" <${SMTP_EMAIL}>`,
+              from: smtpFrom ? `"AlgoChat CRM" <${smtpFrom}>` : undefined,
               to: createdAdmin.email,
               subject: welcomeMail.subject,
               text: welcomeMail.text,
@@ -460,6 +452,7 @@ export async function POST(request) {
       );
     }
 
+    const smtpFrom = normalizeSmtpEmail(process.env.SMTP_EMAIL);
     const connection = await getConnection();
     try {
       const conflict = await findExistingAccountConflicts(connection, { phone, email });
@@ -495,7 +488,7 @@ export async function POST(request) {
 
       const verificationMail = buildVerificationEmail({ name, code: verificationCode });
       await transporter.sendMail({
-        from: `"AlgoChat CRM" <${SMTP_EMAIL}>`,
+        from: smtpFrom ? `"AlgoChat CRM" <${smtpFrom}>` : undefined,
         to: email,
         subject: verificationMail.subject,
         text: verificationMail.text,

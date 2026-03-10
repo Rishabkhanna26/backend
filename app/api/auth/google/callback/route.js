@@ -9,7 +9,7 @@ const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token';
 const GOOGLE_USERINFO_URL = 'https://openidconnect.googleapis.com/v1/userinfo';
 
 const buildRedirectUrl = (request, path) => {
-  const frontendUrl = String(process.env.FRONTEND_URL || '').trim();
+  const frontendUrl = String(process.env.FRONTEND_URL || process.env.FRONTEND_ORIGIN || '').trim();
   if (frontendUrl) {
     return new URL(path, frontendUrl);
   }
@@ -66,9 +66,15 @@ export async function GET(request) {
 
   const clientId = process.env.GOOGLE_CLIENT_ID;
   const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
+  const configuredRedirectUri = String(process.env.GOOGLE_REDIRECT_URI || '').trim();
+  const frontendUrl = String(process.env.FRONTEND_URL || process.env.FRONTEND_ORIGIN || '').trim();
+  const inferredRedirectUri = frontendUrl
+    ? new URL('/api/auth/google/callback', frontendUrl).toString()
+    : '';
   const redirectUri =
     storedRedirectUri ||
-    process.env.GOOGLE_REDIRECT_URI ||
+    configuredRedirectUri ||
+    inferredRedirectUri ||
     new URL('/api/auth/google/callback', request.url).toString();
 
   if (!clientId || !clientSecret || !redirectUri) {
