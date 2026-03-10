@@ -4,6 +4,7 @@ import qrImage from "qrcode";
 import { execFileSync } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { existsSync } from "node:fs";
+import { createRequire } from "node:module";
 import {
   addDays,
   addMinutes,
@@ -2633,6 +2634,8 @@ const PUPPETEER_CANDIDATE_COMMANDS = Object.freeze([
   "chromium",
 ]);
 
+const require = createRequire(import.meta.url);
+
 const resolvePuppeteerExecutablePath = () => {
   const configured = String(process.env.PUPPETEER_EXECUTABLE_PATH || "").trim();
   if (configured && existsSync(configured)) {
@@ -2642,6 +2645,21 @@ const resolvePuppeteerExecutablePath = () => {
     logger.warn("Configured PUPPETEER_EXECUTABLE_PATH not found. Falling back to auto-detect.", {
       configuredPath: configured,
     });
+  }
+
+  // Prefer Puppeteer's managed browser (often installed via:
+  // `npx puppeteer browsers install chrome` during deployment).
+  // This avoids relying on system Chrome being present on the host.
+  try {
+    const puppeteer = require("puppeteer");
+    if (puppeteer?.executablePath) {
+      const candidate = String(puppeteer.executablePath() || "").trim();
+      if (candidate && existsSync(candidate)) {
+        return candidate;
+      }
+    }
+  } catch (_error) {
+    // Puppeteer may not be available as a direct dependency in some environments.
   }
 
   for (const candidate of PUPPETEER_CANDIDATE_PATHS) {
