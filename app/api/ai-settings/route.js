@@ -8,6 +8,8 @@ const DEFAULTS = Object.freeze({
   ai_prompt: '',
   ai_blocklist: '',
   automation_enabled: true,
+  automation_trigger_mode: 'any',
+  automation_trigger_keyword: '',
   whatsapp_pending_recovery_enabled: true,
   whatsapp_only_post_config_messages: true,
   whatsapp_preconfig_message_grace_ms: 30000,
@@ -56,6 +58,23 @@ export async function PUT(request) {
     const ai_blocklist = typeof body.ai_blocklist === 'string' ? body.ai_blocklist : undefined;
     const automation_enabled =
       typeof body.automation_enabled === 'boolean' ? body.automation_enabled : undefined;
+    const automation_trigger_mode =
+      typeof body.automation_trigger_mode === 'string'
+        ? body.automation_trigger_mode.trim().toLowerCase()
+        : undefined;
+    const automation_trigger_keyword =
+      typeof body.automation_trigger_keyword === 'string'
+        ? body.automation_trigger_keyword.trim().slice(0, 40)
+        : undefined;
+    if (automation_trigger_mode === 'keyword') {
+      const keyword = (automation_trigger_keyword || '').trim();
+      if (!keyword || keyword.length < 3) {
+        return Response.json(
+          { success: false, error: 'Automation keyword must be at least 3 characters.' },
+          { status: 400 }
+        );
+      }
+    }
     const whatsapp_pending_recovery_enabled =
       typeof body.whatsapp_pending_recovery_enabled === 'boolean'
         ? body.whatsapp_pending_recovery_enabled
@@ -166,6 +185,9 @@ export async function PUT(request) {
       ai_prompt,
       ai_blocklist,
       automation_enabled,
+      automation_trigger_mode:
+        automation_trigger_mode === 'keyword' ? 'keyword' : automation_trigger_mode === 'any' ? 'any' : undefined,
+      automation_trigger_keyword: automation_trigger_keyword !== undefined ? automation_trigger_keyword : undefined,
       whatsapp_pending_recovery_enabled,
       whatsapp_only_post_config_messages,
       whatsapp_preconfig_message_grace_ms:

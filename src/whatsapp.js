@@ -200,6 +200,18 @@ const normalizeWhatsappCatalogLimit = (value, fallback = 3) => {
   return normalized;
 };
 
+const normalizeAutomationTriggerMode = (value) =>
+  String(value || "")
+    .trim()
+    .toLowerCase() === "keyword"
+    ? "keyword"
+    : "any";
+
+const normalizeAutomationTriggerKeyword = (value) => {
+  const keyword = sanitizeText(value || "", 40).trim();
+  return keyword;
+};
+
 const getAdminAISettings = async (adminId) => {
   if (!Number.isFinite(adminId)) return null;
   const cached = aiSettingsCache.get(adminId);
@@ -211,6 +223,7 @@ const getAdminAISettings = async (adminId) => {
   try {
     [rows] = await db.query(
       `SELECT ai_enabled, ai_prompt, ai_blocklist,
+              automation_trigger_mode, automation_trigger_keyword,
               appointment_start_hour, appointment_end_hour,
               appointment_slot_minutes, appointment_window_months
        FROM admins
@@ -231,6 +244,8 @@ const getAdminAISettings = async (adminId) => {
     );
   }
   const data = rows[0] || { ai_enabled: false, ai_prompt: null, ai_blocklist: null };
+  data.automation_trigger_mode = normalizeAutomationTriggerMode(data.automation_trigger_mode);
+  data.automation_trigger_keyword = normalizeAutomationTriggerKeyword(data.automation_trigger_keyword);
   aiSettingsCache.set(adminId, { at: now, data });
   return data;
 };
@@ -332,7 +347,7 @@ const getContactByPhone = async (phone) => {
   let rows;
   try {
     [rows] = await db.query(
-      `SELECT id, name, email, assigned_admin_id, automation_disabled
+      `SELECT id, name, email, assigned_admin_id, automation_disabled, automation_activated
        FROM contacts
        WHERE phone = ? OR regexp_replace(phone, '\\D', '', 'g') = ?
        LIMIT 1`,
@@ -349,7 +364,7 @@ const getContactByPhone = async (phone) => {
        LIMIT 1`,
       [phone, phone]
     );
-    rows = rows.map((row) => ({ ...row, automation_disabled: false }));
+    rows = rows.map((row) => ({ ...row, automation_disabled: false, automation_activated: true }));
   }
   return rows || [];
 };
@@ -5998,6 +6013,7 @@ const handleIncomingMessage = async ({
         name: sanitizeNameUpper(rows[0]?.name),
         email: sanitizeEmail(rows[0]?.email),
         automation_disabled: rows[0]?.automation_disabled === true,
+        automation_activated: rows[0]?.automation_activated !== false,
       }
       : null;
     let assignedAdminId = existingUser?.assigned_admin_id || activeAdminId;
@@ -6009,17 +6025,40 @@ const handleIncomingMessage = async ({
       );
     }
 
+    const gateSettings = await getAdminAISettings(assignedAdminId);
+    const gateMode = normalizeAutomationTriggerMode(gateSettings?.automation_trigger_mode);
+    const gateKeyword = normalizeAutomationTriggerKeyword(gateSettings?.automation_trigger_keyword);
+    const requiresKeywordActivation = gateMode === "keyword" && gateKeyword.length >= 3;
+    const initialAutomationActivated = !requiresKeywordActivation;
+
     if (!isReturningUser) {
       try {
-        const [createdRows] = await db.query(
-          "INSERT INTO contacts (phone, assigned_admin_id) VALUES (?, ?) RETURNING id",
-          [phone, assignedAdminId]
-        );
+        let createdRows;
+        try {
+          [createdRows] = await db.query(
+            "INSERT INTO contacts (phone, assigned_admin_id, automation_activated, automation_activated_at) VALUES (?, ?, ?, ?) RETURNING id",
+            [
+              phone,
+              assignedAdminId,
+              initialAutomationActivated,
+              initialAutomationActivated ? new Date().toISOString() : null,
+            ]
+          );
+        } catch (insertError) {
+          if (!isMissingColumnError(insertError)) {
+            throw insertError;
+          }
+          [createdRows] = await db.query(
+            "INSERT INTO contacts (phone, assigned_admin_id) VALUES (?, ?) RETURNING id",
+            [phone, assignedAdminId]
+          );
+        }
         existingUser = {
           id: createdRows[0]?.id || null,
           name: null,
           email: null,
           assigned_admin_id: assignedAdminId,
+          automation_activated: initialAutomationActivated,
         };
       } catch (err) {
         if (err.code === "ER_DUP_ENTRY" || err.code === "23505") {
@@ -6030,6 +6069,7 @@ const handleIncomingMessage = async ({
               name: sanitizeNameUpper(freshRows[0]?.name),
               email: sanitizeEmail(freshRows[0]?.email),
               automation_disabled: freshRows[0]?.automation_disabled === true,
+              automation_activated: freshRows[0]?.automation_activated !== false,
             };
             isReturningUser = true;
           }
@@ -6059,6 +6099,7 @@ const handleIncomingMessage = async ({
         finalized: false,
         idleTimer: null,
         automationDisabled: existingUser?.automation_disabled === true,
+        automationActivated: existingUser?.automation_activated !== false,
       };
     }
 
@@ -6102,6 +6143,40 @@ const handleIncomingMessage = async ({
     }
 
     const aiSettings = await getAdminAISettings(assignedAdminId);
+    const triggerMode = normalizeAutomationTriggerMode(aiSettings?.automation_trigger_mode);
+    const triggerKeyword = normalizeAutomationTriggerKeyword(aiSettings?.automation_trigger_keyword);
+    const requiresKeyword = triggerMode === "keyword" && triggerKeyword.length >= 3;
+    if (!requiresKeyword) {
+      user.automationActivated = true;
+    }
+    if (requiresKeyword && user.automationActivated !== true) {
+      const normalizedKeyword = normalizeComparableText(triggerKeyword);
+      const normalizedIncoming = normalizeComparableText(messageText);
+      const matchedKeyword =
+        Boolean(normalizedKeyword) &&
+        Boolean(normalizedIncoming) &&
+        (normalizedIncoming === normalizedKeyword || normalizedIncoming.includes(normalizedKeyword));
+
+      if (!matchedKeyword) {
+        // Keyword gating: do not trigger automation until the keyword is received.
+        return;
+      }
+
+      if (Number.isFinite(Number(user.clientId)) && Number(user.clientId) > 0) {
+        try {
+          await db.query(
+            "UPDATE contacts SET automation_activated = TRUE, automation_activated_at = NOW() WHERE id = ?",
+            [Number(user.clientId)]
+          );
+        } catch (error) {
+          if (!isMissingColumnError(error)) throw error;
+        }
+      }
+      user.automationActivated = true;
+      await sendMessage('✅ Auto replies activated. Send "Hi" to see the menu.');
+      return;
+    }
+
     const appointmentSettings = resolveAppointmentSettings(aiSettings);
     user.data.appointmentSettings = appointmentSettings;
     const businessType = normalizeBusinessType(adminProfile?.business_type);
