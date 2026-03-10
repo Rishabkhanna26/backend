@@ -1,0 +1,10 @@
+.git
+.next
+node_modules
+npm-debug.log
+*.log
+.env
+.env.*
+.wwebjs_cache
+storage
+
