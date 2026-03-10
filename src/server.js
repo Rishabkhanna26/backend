@@ -429,8 +429,10 @@ app.post("/whatsapp/start", async (req, res) => {
     logger.info("WhatsApp started successfully", { adminId });
     res.json(result);
   } catch (err) {
-    logger.error("Failed to start WhatsApp", { error: err.message, stack: err.stack });
-    res.status(500).json({ error: "Failed to start WhatsApp" });
+    const message = String(err?.message || "").trim() || "Failed to start WhatsApp";
+    logger.error("Failed to start WhatsApp", { error: message, stack: err?.stack, adminId: getScopedAdminIdFromRequest(req) });
+    // This route is backend-auth protected; returning a reason here is acceptable and helps debug deployments.
+    res.status(500).json({ error: message });
   }
 });
 
@@ -445,8 +447,9 @@ app.post("/whatsapp/disconnect", async (req, res) => {
     logger.info("WhatsApp disconnected successfully", { adminId: getScopedAdminIdFromRequest(req) });
     res.json(result);
   } catch (err) {
-    logger.error("Failed to disconnect WhatsApp", { error: err.message, stack: err.stack });
-    res.status(500).json({ error: "Failed to disconnect WhatsApp" });
+    const message = String(err?.message || "").trim() || "Failed to disconnect WhatsApp";
+    logger.error("Failed to disconnect WhatsApp", { error: message, stack: err?.stack, adminId: getScopedAdminIdFromRequest(req) });
+    res.status(500).json({ error: message });
   }
 });
 
