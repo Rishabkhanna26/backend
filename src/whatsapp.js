@@ -255,6 +255,7 @@ const isMissingColumnError = (error) =>
   (error.code === "42703" || String(error.message || "").toLowerCase().includes("column"));
 
 let orderPaymentReferenceColumnsReadyPromise = null;
+let automationTriggerColumnsReadyPromise = null;
 
 const ensureOrderPaymentReferenceColumns = async () => {
   if (orderPaymentReferenceColumnsReadyPromise) {
@@ -269,6 +270,30 @@ const ensureOrderPaymentReferenceColumns = async () => {
     throw error;
   });
   return orderPaymentReferenceColumnsReadyPromise;
+};
+
+const ensureAutomationTriggerColumns = async () => {
+  if (automationTriggerColumnsReadyPromise) {
+    return automationTriggerColumnsReadyPromise;
+  }
+  automationTriggerColumnsReadyPromise = (async () => {
+    await db.query(
+      `ALTER TABLE admins ADD COLUMN IF NOT EXISTS automation_trigger_mode VARCHAR(20) NOT NULL DEFAULT 'any'`
+    );
+    await db.query(
+      `ALTER TABLE admins ADD COLUMN IF NOT EXISTS automation_trigger_keyword VARCHAR(40)`
+    );
+    await db.query(
+      `ALTER TABLE contacts ADD COLUMN IF NOT EXISTS automation_activated BOOLEAN NOT NULL DEFAULT TRUE`
+    );
+    await db.query(
+      `ALTER TABLE contacts ADD COLUMN IF NOT EXISTS automation_activated_at TIMESTAMPTZ`
+    );
+  })().catch((error) => {
+    automationTriggerColumnsReadyPromise = null;
+    throw error;
+  });
+  return automationTriggerColumnsReadyPromise;
 };
 
 const getAdminAutomationProfile = async (adminId) => {
@@ -6003,6 +6028,8 @@ const handleIncomingMessage = async ({
       console.warn("⚠️ Incoming message ignored because no admin is connected.");
       return;
     }
+
+    await ensureAutomationTriggerColumns();
 
     const rows = await getContactByPhone(phone);
 
