@@ -39,6 +39,7 @@ import {
   buildCatalogAvailabilityReply,
   buildCatalogGreetingPreview,
   buildCatalogListReply,
+  buildCatalogLowestPopularityDeflectionReply,
   buildCatalogPopularReply,
   buildCatalogPriceReply,
   collectCatalogComparableTerms,
@@ -1635,6 +1636,13 @@ const CATALOG_POPULAR_HINTS = [
   "recommended",
   "recommend",
   "suggest",
+  "best seller",
+  "best-seller",
+  "bestseller",
+  "most seller",
+  "most selling",
+  "most sold",
+  "highest selling",
   "sabse best",
   "sabse acha",
   "sabse accha",
@@ -1648,6 +1656,37 @@ const CATALOG_POPULAR_HINTS = [
   "most bought",
   "top selling",
 ];
+const CATALOG_UNPOPULAR_HINTS = [
+  "least selling",
+  "least sold",
+  "lowest selling",
+  "low selling",
+  "least popular",
+  "worst seller",
+  "kam bikne",
+  "sabse kam bikne",
+  "sabse kam order",
+  "sabse kam sold",
+];
+
+const BOOKING_KIND_HINTS = Array.from(
+  new Set([
+    "booking",
+    "reservation",
+    "table",
+    "table booking",
+    "restaurant",
+    "cafe",
+    "hotel",
+    "room",
+    "banquet",
+    "venue",
+    "hall",
+    ...getBookingCategoryTerms("Hotel"),
+    ...getBookingCategoryTerms("Restaurant"),
+    ...getBookingCategoryTerms("Events"),
+  ])
+);
 const PRODUCT_SCOPE_HINTS = [
   "product",
   "products",
@@ -1965,7 +2004,21 @@ const detectCatalogRankingIntent = ({ input, catalog, fallbackScope = null }) =>
   };
 };
 
-const detectCatalogPopularityIntent = ({ input, catalog, fallbackScope = null }) => {
+const resolveAppointmentKindPreference = ({ input, user, bookingEnabled }) => {
+  if (!bookingEnabled) return "service";
+  if (user?.data?.appointmentKind === "booking" || user?.data?.reason === "Booking") return "booking";
+  const normalized = normalizeComparableText(input);
+  if (!normalized) return "service";
+  return textHasAny(normalized, BOOKING_KIND_HINTS) ? "booking" : "service";
+};
+
+const detectCatalogPopularityIntent = ({
+  input,
+  catalog,
+  fallbackScope = null,
+  bookingEnabled = false,
+  user = null,
+}) => {
   const normalized = normalizeComparableText(input);
   if (!normalized) return null;
   if (!textHasAny(normalized, CATALOG_POPULAR_HINTS)) return null;
@@ -1977,13 +2030,60 @@ const detectCatalogPopularityIntent = ({ input, catalog, fallbackScope = null })
   });
 
   if (scope === "product" || scope === "service") {
-    return { itemType: scope };
+    return {
+      itemType: scope,
+      appointmentKind:
+        scope === "service"
+          ? resolveAppointmentKindPreference({ input: normalized, user, bookingEnabled })
+          : "service",
+    };
   }
   if (catalog?.products?.length) {
     return { itemType: "product" };
   }
   if (catalog?.services?.length) {
-    return { itemType: "service" };
+    return {
+      itemType: "service",
+      appointmentKind: resolveAppointmentKindPreference({ input: normalized, user, bookingEnabled }),
+    };
+  }
+  return null;
+};
+
+const detectCatalogUnpopularIntent = ({
+  input,
+  catalog,
+  fallbackScope = null,
+  bookingEnabled = false,
+  user = null,
+}) => {
+  const normalized = normalizeComparableText(input);
+  if (!normalized) return null;
+  if (!textHasAny(normalized, CATALOG_UNPOPULAR_HINTS)) return null;
+
+  const scope = resolveCatalogQueryScope({
+    input: normalized,
+    catalog,
+    fallbackScope,
+  });
+
+  if (scope === "product" || scope === "service") {
+    return {
+      itemType: scope,
+      appointmentKind:
+        scope === "service"
+          ? resolveAppointmentKindPreference({ input: normalized, user, bookingEnabled })
+          : "service",
+    };
+  }
+  if (catalog?.products?.length) {
+    return { itemType: "product" };
+  }
+  if (catalog?.services?.length) {
+    return {
+      itemType: "service",
+      appointmentKind: resolveAppointmentKindPreference({ input: normalized, user, bookingEnabled }),
+    };
   }
   return null;
 };
@@ -5091,7 +5191,12 @@ const getFallbackCatalogRecommendation = ({ catalog, itemType = "product" }) => 
   );
 };
 
-const getMostPopularCatalogItem = async ({ adminId, itemType = "product", catalog }) => {
+const getMostPopularCatalogItem = async ({
+  adminId,
+  itemType = "product",
+  appointmentKind = "service",
+  catalog,
+}) => {
   const normalizedAdminId = Number(adminId);
   const fallbackItem = getFallbackCatalogRecommendation({ catalog, itemType });
   if (!Number.isFinite(normalizedAdminId) || normalizedAdminId <= 0) {
@@ -5099,6 +5204,7 @@ const getMostPopularCatalogItem = async ({ adminId, itemType = "product", catalo
   }
 
   if (itemType === "service") {
+    const normalizedKind = appointmentKind === "booking" ? "booking" : "service";
     const [rows] = await db.query(
       `
         SELECT
@@ -5106,14 +5212,14 @@ const getMostPopularCatalogItem = async ({ adminId, itemType = "product", catalo
           COUNT(*)::int AS total_bookings
         FROM appointments
         WHERE admin_id = ?
-          AND COALESCE(appointment_kind, 'service') = 'service'
+          AND COALESCE(appointment_kind, 'service') = ?
           AND COALESCE(status, 'booked') <> 'cancelled'
           AND btrim(COALESCE(appointment_type, '')) <> ''
         GROUP BY btrim(COALESCE(appointment_type, ''))
         ORDER BY total_bookings DESC, item_name ASC
         LIMIT 1
       `,
-      [normalizedAdminId]
+      [normalizedAdminId, normalizedKind]
     );
     const topRow = rows?.[0] || null;
     if (!topRow) {
@@ -6033,6 +6139,15 @@ const handleIncomingMessage = async ({
       input: normalizedMessage,
       catalog,
       fallbackScope: catalogContextScope,
+      bookingEnabled,
+      user,
+    });
+    const catalogUnpopularIntent = detectCatalogUnpopularIntent({
+      input: normalizedMessage,
+      catalog,
+      fallbackScope: catalogContextScope,
+      bookingEnabled,
+      user,
     });
     const catalogRankingIntent = detectCatalogRankingIntent({
       input: normalizedMessage,
@@ -6256,15 +6371,37 @@ const handleIncomingMessage = async ({
       return;
     }
 
+    if (!hasActiveGuidedFlow && catalogUnpopularIntent) {
+      const popularItem = await getMostPopularCatalogItem({
+        adminId: assignedAdminId,
+        itemType: catalogUnpopularIntent.itemType,
+        appointmentKind: catalogUnpopularIntent.appointmentKind,
+        catalog,
+      });
+      const deflectionReply = buildCatalogLowestPopularityDeflectionReply({
+        item: popularItem?.item,
+        itemType: catalogUnpopularIntent.itemType,
+        appointmentKind: catalogUnpopularIntent.appointmentKind,
+        languageCode: responseLanguage?.code || "en",
+      });
+      appendAiConversationHistory(user, "user", messageText);
+      appendAiConversationHistory(user, "assistant", deflectionReply);
+      await sendMessage(deflectionReply);
+      trackLeadCaptureActivity({ user, messageText, phone, assignedAdminId });
+      return;
+    }
+
     if (!hasActiveGuidedFlow && catalogPopularityIntent) {
       const popularItem = await getMostPopularCatalogItem({
         adminId: assignedAdminId,
         itemType: catalogPopularityIntent.itemType,
+        appointmentKind: catalogPopularityIntent.appointmentKind,
         catalog,
       });
       const popularReply = buildCatalogPopularReply({
         item: popularItem?.item,
         itemType: catalogPopularityIntent.itemType,
+        appointmentKind: catalogPopularityIntent.appointmentKind,
         languageCode: responseLanguage?.code || "en",
         source: popularItem?.source || "fallback",
       });

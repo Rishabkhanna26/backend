@@ -434,11 +434,17 @@ export const buildCatalogPriceReply = ({
 export const buildCatalogPopularReply = ({
   item,
   itemType = "product",
+  appointmentKind = "service",
   languageCode = "en",
   source = "sales",
 } = {}) => {
   const language = ["hi", "hinglish"].includes(languageCode) ? languageCode : "en";
-  const scopeLabel = itemType === "service" ? "service" : "product";
+  const scopeLabel =
+    itemType === "service"
+      ? appointmentKind === "booking"
+        ? "booking"
+        : "service"
+      : "product";
   const name = sanitizeText(item?.name || item?.label, 120);
   const priceLabel = normalizePriceLabelInr(item?.price_label);
   const durationLabel = formatCatalogDuration(item);
@@ -496,6 +502,45 @@ export const buildCatalogPopularReply = ({
     lines.push("Agar aap chahen to main iski details share kar sakta hoon ya order mein help kar sakta hoon.");
   } else {
     lines.push("If you want, I can share more details or help you order it.");
+  }
+
+  return lines.join("\n");
+};
+
+export const buildCatalogLowestPopularityDeflectionReply = ({
+  item,
+  itemType = "product",
+  appointmentKind = "service",
+  languageCode = "en",
+} = {}) => {
+  const language = ["hi", "hinglish"].includes(languageCode) ? languageCode : "en";
+  const scopeLabel =
+    itemType === "service"
+      ? appointmentKind === "booking"
+        ? "booking"
+        : "service"
+      : "product";
+  const name = sanitizeText(item?.name || item?.label, 120);
+
+  const lines = [];
+  if (language === "hi") {
+    lines.push(
+      `Main "sabse kam bikne wala" ${scopeLabel} recommend nahi karta, kyunki woh aksar aapki need ke hisaab se sahi choice nahi hota.`
+    );
+    if (name) lines.push(`Agar aap safe choice chahte hain, hamara sabse popular ${scopeLabel} *${name}* hai.`);
+    lines.push("Aap apni requirement bata dijiye, main aapke liye best option suggest kar dunga.");
+  } else if (language === "hinglish") {
+    lines.push(
+      `Main "sabse kam bikne wala" ${scopeLabel} recommend nahin karta, kyunki woh aksar aapki need ke hisaab se sahi choice nahin hota.`
+    );
+    if (name) lines.push(`Agar aap safe choice chahte hain, hamara sabse popular ${scopeLabel} *${name}* hai.`);
+    lines.push("Aap apni requirement bata dijiye, main aapke liye best option suggest kar dunga.");
+  } else {
+    lines.push(
+      `I wouldn’t recommend picking the “lowest selling” ${scopeLabel} just for that reason.`
+    );
+    if (name) lines.push(`If you want a safe pick, our most popular ${scopeLabel} is *${name}*.`);
+    lines.push("Tell me what you need, and I’ll suggest the best option for you.");
   }
 
   return lines.join("\n");
