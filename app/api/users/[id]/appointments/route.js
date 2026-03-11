@@ -1,12 +1,12 @@
 import { getAppointmentsForUser, getUserById } from '../../../../../lib/db-helpers';
 import { parsePagination, parseStatus } from '../../../../../lib/api-utils';
-import { requireAuth } from '../../../../../lib/auth-server';
+import { requireReadAuth } from '../../../../../lib/auth-server';
 import { hasAppointmentAccess } from '../../../../../lib/business.js';
 
 export async function GET(req, context) {
   try {
-    const authUser = await requireAuth();
-    if (!hasAppointmentAccess(authUser)) {
+    const authUser = await requireReadAuth();
+    if (!authUser.restricted_mode && !hasAppointmentAccess(authUser)) {
       return Response.json(
         { success: false, error: 'Appointments are disabled for this admin.' },
         { status: 403 }

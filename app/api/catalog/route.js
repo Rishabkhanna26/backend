@@ -1,4 +1,4 @@
-import { requireAuth } from '../../../lib/auth-server';
+import { requireAuth, requireReadAuth } from '../../../lib/auth-server';
 import { createCatalogItem, getCatalogItems } from '../../../lib/db-helpers';
 import { parsePagination, parseSearch, parseStatus } from '../../../lib/api-utils';
 import { canUseCatalogItemType } from '../../../lib/business.js';
@@ -61,7 +61,7 @@ const parsePriceAmount = (value) => {
 
 export async function GET(request) {
   try {
-    const user = await requireAuth();
+    const user = await requireReadAuth();
     const { searchParams } = new URL(request.url);
     const { limit, offset } = parsePagination(searchParams, { defaultLimit: 200, maxLimit: 500 });
     const search = parseSearch(searchParams);

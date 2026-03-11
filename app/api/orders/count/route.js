@@ -1,4 +1,4 @@
-import { requireAuth } from '../../../../lib/auth-server';
+import { requireReadAuth } from '../../../../lib/auth-server';
 import { countOrdersSince } from '../../../../lib/db-helpers';
 import { hasProductAccess } from '../../../../lib/business.js';
 
@@ -10,8 +10,8 @@ const parseSince = (value) => {
 
 export async function GET(request) {
   try {
-    const user = await requireAuth();
-    if (!hasProductAccess(user)) {
+    const user = await requireReadAuth();
+    if (!user.restricted_mode && !hasProductAccess(user)) {
       return Response.json({ success: true, count: 0 });
     }
     const { searchParams } = new URL(request.url);

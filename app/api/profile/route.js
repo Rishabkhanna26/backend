@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import fs from 'fs/promises';
 import path from 'path';
-import { requireAuth } from '../../../lib/auth-server';
+import { requireAuth, requireReadAuth } from '../../../lib/auth-server';
 import { signAuthToken } from '../../../lib/auth';
 import { getAdminById, updateAdminProfile } from '../../../lib/db-helpers';
 import { sanitizeEmail, sanitizeNameUpper, sanitizeText } from '../../../lib/sanitize.js';
@@ -72,7 +72,7 @@ const getProfilePhotoUrl = async (phone, request) => {
 
 export async function GET(request) {
   try {
-    const user = await requireAuth();
+    const user = await requireReadAuth();
     const admin = await getAdminById(user.id);
     if (!admin) {
       const response = NextResponse.json({ success: false, error: 'User not found' }, { status: 401 });

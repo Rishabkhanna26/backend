@@ -1,4 +1,4 @@
-import { requireAuth } from '../../../../lib/auth-server';
+import { requireReadAuth } from '../../../../lib/auth-server';
 import { countUsersSince } from '../../../../lib/db-helpers';
 
 const parseSince = (value) => {
@@ -10,7 +10,7 @@ const parseSince = (value) => {
 
 export async function GET(request) {
   try {
-    const user = await requireAuth();
+    const user = await requireReadAuth();
     const { searchParams } = new URL(request.url);
     const since = parseSince(searchParams.get('since'));
     const adminId = user.admin_tier === 'super_admin' ? null : user.id;

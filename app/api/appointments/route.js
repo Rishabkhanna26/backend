@@ -1,6 +1,6 @@
 import { createAppointment, getAppointments, getUserById } from '../../../lib/db-helpers';
 import { parsePagination, parseSearch, parseStatus } from '../../../lib/api-utils';
-import { requireAuth } from '../../../lib/auth-server';
+import { requireAuth, requireReadAuth } from '../../../lib/auth-server';
 import { hasAppointmentAccess, hasBookingAccess, hasServiceAccess } from '../../../lib/business.js';
 
 const ALLOWED_STATUSES = new Set(['booked', 'completed', 'cancelled']);
@@ -12,8 +12,8 @@ const resolveDefaultAppointmentKind = (user) =>
 
 export async function GET(req) {
   try {
-    const authUser = await requireAuth();
-    if (!hasAppointmentAccess(authUser)) {
+    const authUser = await requireReadAuth();
+    if (!authUser.restricted_mode && !hasAppointmentAccess(authUser)) {
       return Response.json(
         { success: false, error: 'Appointments are disabled for this admin.' },
         { status: 403 }

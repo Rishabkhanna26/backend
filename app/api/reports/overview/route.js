@@ -1,4 +1,4 @@
-import { requireAuth } from '../../../../lib/auth-server';
+import { requireReadAuth } from '../../../../lib/auth-server';
 import { getReportOverview } from '../../../../lib/db-helpers';
 
 const reportCache = new Map();
@@ -17,7 +17,7 @@ function resolveRange(range) {
 
 export async function GET(request) {
   try {
-    const authUser = await requireAuth();
+    const authUser = await requireReadAuth();
     const { searchParams } = new URL(request.url);
     const range = searchParams.get('range') || '7days';
     const startDate = resolveRange(range);

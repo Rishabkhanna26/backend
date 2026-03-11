@@ -1,4 +1,4 @@
-import { requireAuth } from '../../../../lib/auth-server';
+import { requireAuth, requireReadAuth } from '../../../../lib/auth-server';
 import { deleteCatalogItem, getCatalogItemById, updateCatalogItem } from '../../../../lib/db-helpers';
 import { hasBookingAccess } from '../../../../lib/business.js';
 import { resolveBookingCategoryLabel } from '../../../../lib/booking.js';
@@ -68,8 +68,8 @@ export const runtime = 'nodejs';
 
 export async function GET(request, { params }) {
   try {
-    const user = await requireAuth();
-    if (!hasBookingAccess(user)) {
+    const user = await requireReadAuth();
+    if (!user.restricted_mode && !hasBookingAccess(user)) {
       return Response.json({ success: false, error: 'Booking section is disabled.' }, { status: 403 });
     }
     const resolvedParams = await Promise.resolve(params);

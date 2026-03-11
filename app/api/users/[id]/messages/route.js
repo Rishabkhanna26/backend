@@ -5,7 +5,7 @@ import {
   markMessagesRead,
 } from '../../../../../lib/db-helpers';
 import { parsePagination } from '../../../../../lib/api-utils';
-import { requireAuth } from '../../../../../lib/auth-server';
+import { requireAuth, requireReadAuth } from '../../../../../lib/auth-server';
 import { signAuthToken } from '../../../../../lib/auth';
 
 export const runtime = 'nodejs';
@@ -16,7 +16,7 @@ const BACKEND_TOKEN_TTL_SECONDS = 10 * 60;
 
 export async function GET(req, context) {
   try {
-    const authUser = await requireAuth();
+    const authUser = await requireReadAuth();
     await deleteMessagesOlderThan(15);
     const { searchParams } = new URL(req.url);
     const { limit, offset } = parsePagination(searchParams, { defaultLimit: 50, maxLimit: 200 });
@@ -29,7 +29,7 @@ export async function GET(req, context) {
       return Response.json({ success: false, error: 'Invalid user id' }, { status: 400 });
     }
 
-    const shouldMarkRead = offset === 0 && !before;
+    const shouldMarkRead = !authUser.restricted_mode && offset === 0 && !before;
     if (shouldMarkRead) {
       await markMessagesRead(
         userId,

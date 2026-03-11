@@ -1,9 +1,9 @@
-import { requireAuth } from '../../../../../lib/auth-server';
+import { requireReadAuth } from '../../../../../lib/auth-server';
 import { getLatestRequirementForUser, getUserById } from '../../../../../lib/db-helpers';
 
 export async function GET(req, context) {
   try {
-    const authUser = await requireAuth();
+    const authUser = await requireReadAuth();
     const params = await context.params;
     const userId = Number(params?.id);
     if (!Number.isFinite(userId)) {

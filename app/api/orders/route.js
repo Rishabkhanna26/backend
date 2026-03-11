@@ -1,12 +1,12 @@
-import { requireAuth } from '../../../lib/auth-server';
+import { requireReadAuth } from '../../../lib/auth-server';
 import { parsePagination } from '../../../lib/api-utils';
 import { getOrders } from '../../../lib/db-helpers';
 import { hasProductAccess } from '../../../lib/business.js';
 
 export async function GET(request) {
   try {
-    const user = await requireAuth();
-    if (!hasProductAccess(user)) {
+    const user = await requireReadAuth();
+    if (!user.restricted_mode && !hasProductAccess(user)) {
       return Response.json(
         { success: false, error: 'Orders are disabled for this business type.' },
         { status: 403 }

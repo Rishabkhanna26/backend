@@ -1,4 +1,4 @@
-import { requireAuth } from '../../../../lib/auth-server';
+import { requireAuth, requireReadAuth } from '../../../../lib/auth-server';
 import { deleteCatalogItem, getCatalogItemById, updateCatalogItem } from '../../../../lib/db-helpers';
 import { canUseCatalogItemType } from '../../../../lib/business.js';
 
@@ -59,7 +59,7 @@ const parsePriceAmount = (value) => {
 
 export async function GET(request, { params }) {
   try {
-    const user = await requireAuth();
+    const user = await requireReadAuth();
     const resolvedParams = await Promise.resolve(params);
     const itemId = parseId(resolvedParams?.id);
     if (!itemId) {

@@ -1,11 +1,11 @@
 import { addUser, getAllUsers, getUserById, getUserByPhone } from '../../../lib/db-helpers';
 import { parsePagination, parseSearch } from '../../../lib/api-utils';
-import { requireAuth } from '../../../lib/auth-server';
+import { requireAuth, requireReadAuth } from '../../../lib/auth-server';
 import { sanitizeEmail, sanitizeNameUpper, sanitizePhone } from '../../../lib/sanitize.js';
 
 export async function GET(req) {
   try {
-    const authUser = await requireAuth();
+    const authUser = await requireReadAuth();
     const { searchParams } = new URL(req.url);
     const { limit, offset } = parsePagination(searchParams);
     const search = parseSearch(searchParams);
