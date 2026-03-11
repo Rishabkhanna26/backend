@@ -1,12 +1,12 @@
 import { getDashboardStats } from '../../../../lib/db-helpers';
-import { requireAuth } from '../../../../lib/auth-server';
+import { requireDashboardAuth } from '../../../../lib/auth-server';
 
 const statsCache = new Map();
 const STATS_TTL_MS = 30_000;
 
 export async function GET(req) {
   try {
-    const authUser = await requireAuth();
+    const authUser = await requireDashboardAuth();
     const adminKey = authUser.admin_tier === 'super_admin' ? 'all' : String(authUser.id);
     const now = Date.now();
     const cached = statsCache.get(adminKey);

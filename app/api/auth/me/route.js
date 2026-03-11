@@ -1,15 +1,9 @@
 import { NextResponse } from 'next/server';
-import { getAuthUser } from '../../../../lib/auth-server';
-import { getAdminById } from '../../../../lib/db-helpers';
+import { getSessionUser } from '../../../../lib/auth-server';
 
 export async function GET() {
-  const user = await getAuthUser();
+  const user = await getSessionUser();
   if (!user) {
-    return NextResponse.json({ user: null }, { status: 401 });
-  }
-
-  const admin = await getAdminById(user.id);
-  if (!admin) {
     const response = NextResponse.json({ user: null }, { status: 401 });
     response.cookies.set({
       name: 'auth_token',
@@ -25,23 +19,24 @@ export async function GET() {
 
   return NextResponse.json({
     user: {
-      id: admin.id,
-      name: admin.name,
-      email: admin.email,
-      phone: admin.phone,
-      admin_tier: admin.admin_tier,
-      business_name: admin.business_name,
-      business_category: admin.business_category,
-      business_type: admin.business_type,
-      booking_enabled: admin.booking_enabled,
-      business_address: admin.business_address,
-      business_hours: admin.business_hours,
-      business_map_url: admin.business_map_url,
-      free_delivery_enabled: admin.free_delivery_enabled,
-      free_delivery_min_amount: admin.free_delivery_min_amount,
-      free_delivery_scope: admin.free_delivery_scope,
-      status: admin.status,
-      access_expires_at: admin.access_expires_at,
+      id: user.id,
+      name: user.name,
+      email: user.email,
+      phone: user.phone,
+      admin_tier: user.admin_tier,
+      business_name: user.business_name,
+      business_category: user.business_category,
+      business_type: user.business_type,
+      booking_enabled: user.booking_enabled,
+      business_address: user.business_address,
+      business_hours: user.business_hours,
+      business_map_url: user.business_map_url,
+      free_delivery_enabled: user.free_delivery_enabled,
+      free_delivery_min_amount: user.free_delivery_min_amount,
+      free_delivery_scope: user.free_delivery_scope,
+      status: user.status,
+      restricted_mode: user.restricted_mode,
+      access_expires_at: user.access_expires_at,
     },
   });
 }

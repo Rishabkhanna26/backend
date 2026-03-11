@@ -75,9 +75,15 @@ export async function POST(request) {
       }
 
       const user = users[0];
-      if (user.status !== 'active') {
+      const accessExpiryTime = user.access_expires_at
+        ? new Date(user.access_expires_at).getTime()
+        : Number.NaN;
+      const hasAccessExpiry = Number.isFinite(accessExpiryTime);
+      const isAccessExpired = hasAccessExpiry && accessExpiryTime <= Date.now();
+
+      if (isAccessExpired) {
         return NextResponse.json(
-          { error: 'Account is inactive or expired' },
+          { error: 'Access expired. Please contact super admin.' },
           { status: 403 }
         );
       }
@@ -103,6 +109,7 @@ export async function POST(request) {
         business_category: user.business_category,
         business_type: user.business_type,
         booking_enabled: user.booking_enabled,
+        status: user.status,
         access_expires_at: user.access_expires_at,
       });
 
@@ -116,6 +123,8 @@ export async function POST(request) {
           business_category: user.business_category,
           business_type: user.business_type,
           booking_enabled: user.booking_enabled,
+          status: user.status,
+          restricted_mode: user.status !== 'active',
           access_expires_at: user.access_expires_at,
         },
       });

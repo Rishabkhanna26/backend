@@ -49,6 +49,13 @@ const buildPlaceholderPhone = (provider, subject) => {
   return sanitizePhone(numeric, { min: 10, max: 14 }) || '9000000000';
 };
 
+const isAccessExpired = (value) => {
+  if (!value) return false;
+  const time = new Date(value).getTime();
+  if (!Number.isFinite(time)) return false;
+  return time <= Date.now();
+};
+
 export async function GET(request) {
   const url = new URL(request.url);
   const code = url.searchParams.get('code');
@@ -130,7 +137,7 @@ export async function GET(request) {
     try {
       const [existing] = await connection.query(
         `SELECT id, name, email, phone, admin_tier, status,
-                business_category, business_type, booking_enabled
+                business_category, business_type, booking_enabled, access_expires_at
          FROM admins
          WHERE LOWER(email) = ?
          LIMIT 1`,
@@ -139,21 +146,27 @@ export async function GET(request) {
 
       let admin = existing[0];
       if (!admin) {
+        const [superAdmins] = await connection.query(
+          `SELECT COUNT(*) as count FROM admins WHERE admin_tier = 'super_admin'`
+        );
+        const hasSuperAdmin = Number(superAdmins[0]?.count || 0) > 0;
+        const adminTier = hasSuperAdmin ? 'client_admin' : 'super_admin';
+        const status = hasSuperAdmin ? 'inactive' : 'active';
         const placeholderPhone = buildPlaceholderPhone('google', profile?.sub || email);
         const [rows] = await connection.query(
           `INSERT INTO admins (
              name, phone, email, admin_tier, status,
              business_category, business_type
            )
-           VALUES (?, ?, ?, 'client_admin', 'inactive', 'general', 'both')
-           RETURNING id, name, email, phone, admin_tier, status, business_category, business_type, booking_enabled`,
-          [displayName, placeholderPhone, email]
+           VALUES (?, ?, ?, ?, ?, 'general', 'both')
+           RETURNING id, name, email, phone, admin_tier, status, business_category, business_type, booking_enabled, access_expires_at`,
+          [displayName, placeholderPhone, email, adminTier, status]
         );
         admin = rows[0];
       }
 
-      if (!admin || admin.status !== 'active') {
-        const response = NextResponse.redirect(buildRedirectUrl(request, '/login?oauth=pending_approval'));
+      if (!admin || isAccessExpired(admin.access_expires_at)) {
+        const response = NextResponse.redirect(buildRedirectUrl(request, '/login?oauth=access_expired'));
         clearStateCookie(response);
         return response;
       }
@@ -167,9 +180,11 @@ export async function GET(request) {
         business_category: admin.business_category,
         business_type: admin.business_type,
         booking_enabled: admin.booking_enabled,
+        status: admin.status,
+        access_expires_at: admin.access_expires_at,
       });
 
-      const response = NextResponse.redirect(buildRedirectUrl(request, '/'));
+      const response = NextResponse.redirect(buildRedirectUrl(request, '/dashboard'));
       response.cookies.set({
         name: 'auth_token',
         value: jwtToken,
