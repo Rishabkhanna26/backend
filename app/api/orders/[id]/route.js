@@ -1,5 +1,10 @@
 import { requireAuth } from '../../../../lib/auth-server';
-import { deleteOrder, getOrderById, updateOrder } from '../../../../lib/db-helpers';
+import {
+  deleteOrder,
+  getEffectiveRazorpayCredentials,
+  getOrderById,
+  updateOrder,
+} from '../../../../lib/db-helpers';
 import { hasProductAccess } from '../../../../lib/business.js';
 import { isRazorpayConfigured, verifyRazorpayPaymentLink } from '../../../../lib/razorpay.js';
 
@@ -195,7 +200,9 @@ export async function PATCH(request, context) {
     }
 
     if (updates.payment_status === 'paid') {
-      if (!isRazorpayConfigured()) {
+      const orderAdminId = Number(currentOrder?.admin_id) || authUser.id;
+      const credentials = (await getEffectiveRazorpayCredentials(orderAdminId)) || {};
+      if (!isRazorpayConfigured(credentials)) {
         return Response.json(
           {
             success: false,
@@ -252,6 +259,7 @@ export async function PATCH(request, context) {
           paymentLinkId: linkId,
           expectedAmount: expectedForVerification,
           proofId,
+          credentials,
         });
       } catch (error) {
         return Response.json(

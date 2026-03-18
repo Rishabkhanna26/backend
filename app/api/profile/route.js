@@ -117,6 +117,10 @@ export async function PUT(request) {
         : undefined;
     const businessTypeRaw =
       typeof body.business_type === 'string' ? body.business_type.trim().toLowerCase() : undefined;
+    const serviceLabel =
+      typeof body.service_label === 'string' ? sanitizeText(body.service_label, 60) : undefined;
+    const productLabel =
+      typeof body.product_label === 'string' ? sanitizeText(body.product_label, 60) : undefined;
     const businessAddress =
       typeof body.business_address === 'string'
         ? sanitizeText(body.business_address, 500)
@@ -161,6 +165,8 @@ export async function PUT(request) {
       business_name: businessName,
       business_category: businessCategory,
       business_type: businessType,
+      service_label: serviceLabel,
+      product_label: productLabel,
       business_address: businessAddress,
       business_hours: businessHours,
       business_map_url: businessMapUrl,
@@ -182,6 +188,8 @@ export async function PUT(request) {
       business_name: admin.business_name,
       business_category: admin.business_category,
       business_type: admin.business_type,
+      service_label: admin.service_label,
+      product_label: admin.product_label,
       booking_enabled: admin.booking_enabled,
       business_address: admin.business_address,
       business_hours: admin.business_hours,

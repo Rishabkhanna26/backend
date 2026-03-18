@@ -1,5 +1,6 @@
 import { requireAuth } from '../../../../../lib/auth-server';
 import {
+  getEffectiveRazorpayCredentials,
   getOrderById,
   getOrderPaymentLinkTimer,
   getUserByPhone,
@@ -132,17 +133,23 @@ export async function POST(request, context) {
       return Response.json({ success: false, error: 'Invalid order id' }, { status: 400 });
     }
 
-    if (!isRazorpayConfigured()) {
-      return Response.json(
-        { success: false, error: 'Razorpay is not configured. Add key id and key secret in env.' },
-        { status: 400 }
-      );
-    }
-
     const adminScopeId = authUser.admin_tier === 'super_admin' ? null : authUser.id;
     const order = await getOrderById(orderId, adminScopeId);
     if (!order) {
       return Response.json({ success: false, error: 'Order not found' }, { status: 404 });
+    }
+
+    const orderAdminId = Number(order?.admin_id) || authUser.id;
+    const credentials = (await getEffectiveRazorpayCredentials(orderAdminId)) || {};
+    if (!isRazorpayConfigured(credentials)) {
+      return Response.json(
+        {
+          success: false,
+          error:
+            'Razorpay is not configured for this admin. Add key id and key secret in Payment settings.',
+        },
+        { status: 400 }
+      );
     }
 
     const customerPhone = normalizePhone(order?.customer_phone);
@@ -192,7 +199,7 @@ export async function POST(request, context) {
       }
       const timer = await scheduleOrderPaymentLinkTimer({
         orderId: order.id,
-        adminId: Number(order?.admin_id) || authUser.id,
+        adminId: orderAdminId,
         scheduledFor,
         createdBy: authUser.id,
         payload: {
@@ -212,7 +219,9 @@ export async function POST(request, context) {
       });
     }
 
-    const currency = normalizeRazorpayCurrency(order?.payment_currency || process.env.RAZORPAY_CURRENCY || 'INR');
+    const currency = normalizeRazorpayCurrency(
+      order?.payment_currency || process.env.RAZORPAY_CURRENCY || 'INR'
+    );
     const callbackUrl = buildCallbackUrl();
     const callbackMethod = toTrimmed(process.env.RAZORPAY_CALLBACK_METHOD).toLowerCase() === 'post' ? 'post' : 'get';
     const orderRef = order?.order_number ? `Order ${order.order_number}` : `Order #${order.id}`;
@@ -228,6 +237,7 @@ export async function POST(request, context) {
         callbackUrl,
         callbackMethod,
         referenceId: buildReferenceId({ adminId: order?.admin_id, orderId: order.id }),
+        credentials,
         customer: {
           name: toTrimmed(order?.customer_name),
           contact: customerPhone,

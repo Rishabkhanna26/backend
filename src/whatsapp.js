@@ -32,7 +32,12 @@ import {
   normalizeRazorpayAmount,
   normalizeRazorpayCurrency,
 } from "../lib/razorpay.js";
-import { syncOrderRevenueByOrderId, updateAppointment } from "../lib/db-helpers.js";
+import {
+  getEffectiveRazorpayCredentials,
+  recordAdminAiUsage,
+  syncOrderRevenueByOrderId,
+  updateAppointment,
+} from "../lib/db-helpers.js";
 import { sessionStateManager, recoveryManager } from "./persistence/index.js";
 import {
   buildCatalogAiContext,
@@ -1233,9 +1238,11 @@ const sortCatalogItemsForWhatsapp = (items = []) =>
   [...items].sort((a, b) => {
     const whatsappOrderA = Number(a?.whatsapp_sort_order ?? 0);
     const whatsappOrderB = Number(b?.whatsapp_sort_order ?? 0);
-    if (whatsappOrderA !== whatsappOrderB) return whatsappOrderA - whatsappOrderB;
     const orderA = Number(a?.sort_order ?? 0);
     const orderB = Number(b?.sort_order ?? 0);
+    const effectiveA = whatsappOrderA > 0 ? whatsappOrderA : orderA;
+    const effectiveB = whatsappOrderB > 0 ? whatsappOrderB : orderB;
+    if (effectiveA !== effectiveB) return effectiveA - effectiveB;
     if (orderA !== orderB) return orderA - orderB;
     return String(a?.name || "").localeCompare(String(b?.name || ""));
   });
@@ -2612,7 +2619,7 @@ const callOpenRouterRawText = async ({
   maxOutputTokens = 240,
   timeoutMs = 12_000,
 }) => {
-  if (!OPENROUTER_API_KEY) return null;
+  if (!OPENROUTER_API_KEY) return { text: null, model: null };
   const result = await requestOpenRouterText({
     apiKey: OPENROUTER_API_KEY,
     endpoint: OPENROUTER_ENDPOINT,
@@ -2631,7 +2638,7 @@ const callOpenRouterRawText = async ({
         result?.attempts
       )}`
     );
-    return null;
+    return { text: null, model: null };
   }
   if (result.model && result.model !== OPENROUTER_MODEL) {
     logger.warn("OpenRouter fallback model used", {
@@ -2644,7 +2651,7 @@ const callOpenRouterRawText = async ({
       })),
     });
   }
-  return result.text;
+  return { text: result.text, model: result.model || OPENROUTER_MODEL };
 };
 
 const maybeRewriteReplyForLanguage = async ({ replyText, responseLanguage }) => {
@@ -2698,6 +2705,8 @@ const maybeRewriteReplyForLanguage = async ({ replyText, responseLanguage }) => 
 };
 
 const fetchOpenRouterReply = async ({
+  adminId,
+  contactId,
   brandName,
   businessInfo,
   businessType,
@@ -2724,7 +2733,7 @@ const fetchOpenRouterReply = async ({
     responseLanguage,
     catalog,
   });
-  const rawText = await callOpenRouterRawText({
+  const { text: rawText, model } = await callOpenRouterRawText({
     prompt,
     temperature: 0.55,
     maxOutputTokens: 300,
@@ -2732,6 +2741,21 @@ const fetchOpenRouterReply = async ({
   });
   try {
     if (!rawText) return null;
+
+    if (adminId) {
+      void recordAdminAiUsage({
+        adminId,
+        contactId,
+        model,
+        prompt,
+        response: rawText,
+      }).catch((error) => {
+        logger.warn("Failed to record AI usage", {
+          adminId,
+          error: error?.message || String(error),
+        });
+      });
+    }
 
     const parsed = tryParseJsonObject(rawText);
     if (parsed) {
@@ -3944,7 +3968,7 @@ const deriveReasonOfContacting = async ({ user, phone }) => {
     history || "No previous context",
   ].join("\n");
 
-  const rawReason = await callOpenRouterRawText({
+  const { text: rawReason } = await callOpenRouterRawText({
     prompt,
     temperature: 0.2,
     maxOutputTokens: 80,
@@ -5515,10 +5539,12 @@ const verifyIntentPayment = async ({ intent, proofId = "" }) => {
       proofMatched: null,
     };
   }
+  const credentials = (await getEffectiveRazorpayCredentials(Number(intent?.adminId))) || {};
   return verifyRazorpayPaymentLink({
     paymentLinkId,
     expectedAmount: intent?.payAmount,
     proofId,
+    credentials,
   });
 };
 
@@ -5550,13 +5576,16 @@ const createGenericOnlinePaymentIntent = async ({
   let paymentUrl = PAYMENT_LINK || "";
   let paymentLinkId = "";
 
-  if (isRazorpayConfigured()) {
+  const credentials = (await getEffectiveRazorpayCredentials(adminId)) || {};
+
+  if (isRazorpayConfigured(credentials)) {
     try {
       const paymentLink = await createRazorpayPaymentLink({
         amount: boundedAmount,
         currency: RAZORPAY_CURRENCY,
         description: RAZORPAY_DESCRIPTION,
         referenceId,
+        credentials,
         customer: {
           name: sanitizeNameUpper(customerName) || "Customer",
           contact: customerPhone || undefined,
@@ -5586,6 +5615,7 @@ const createGenericOnlinePaymentIntent = async ({
   }
 
   return {
+    adminId,
     mode: normalizedMode,
     payAmount: boundedAmount,
     totalAmount,
@@ -6678,6 +6708,8 @@ const handleIncomingMessage = async ({
         return;
       }
       const openRouterReply = await fetchOpenRouterReply({
+        adminId: assignedAdminId,
+        contactId: user?.id,
         brandName,
         businessInfo,
         businessType,
@@ -6718,6 +6750,8 @@ const handleIncomingMessage = async ({
         return;
       }
       const aiReply = await fetchOpenRouterReply({
+        adminId: assignedAdminId,
+        contactId: user?.id,
         brandName,
         businessInfo,
         businessType,

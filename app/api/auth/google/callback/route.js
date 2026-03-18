@@ -179,6 +179,8 @@ export async function GET(request) {
         admin_tier: admin.admin_tier,
         business_category: admin.business_category,
         business_type: admin.business_type,
+        service_label: admin.service_label,
+        product_label: admin.product_label,
         booking_enabled: admin.booking_enabled,
         status: admin.status,
         access_expires_at: admin.access_expires_at,

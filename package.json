@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "backend": "bash ../scripts/dev-backend.sh",
+    "backend": "bash ./scripts/dev-backend.sh",
     "dev:api": "next dev -p 5000",
     "build:api": "next build",
     "start:api": "next start -p 5000",

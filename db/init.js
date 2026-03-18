@@ -187,6 +187,7 @@ async function createUpdatedAtInfrastructure(client) {
 
   const triggerTables = [
     "admins",
+    "admin_billing_settings",
     "signup_verifications",
     "contacts",
     "leads",
@@ -195,6 +196,7 @@ async function createUpdatedAtInfrastructure(client) {
     "orders",
     "order_revenue",
     "order_payment_link_timers",
+    "admin_payment_links",
     "broadcasts",
     "templates",
     "catalog_items",
@@ -214,6 +216,9 @@ async function createUpdatedAtInfrastructure(client) {
 
 async function recreateSchema(client) {
   const dropStatements = [
+    "DROP TABLE IF EXISTS admin_payment_links CASCADE",
+    "DROP TABLE IF EXISTS admin_ai_usage CASCADE",
+    "DROP TABLE IF EXISTS admin_billing_settings CASCADE",
     "DROP TABLE IF EXISTS appointment_payments CASCADE",
     "DROP TABLE IF EXISTS appointment_billing CASCADE",
     "DROP TABLE IF EXISTS order_payments CASCADE",
@@ -264,6 +269,9 @@ async function createSchema(client) {
       business_category VARCHAR(120),
       business_type VARCHAR(20) DEFAULT 'both'
         CHECK (business_type IN ('product', 'service', 'both')),
+      service_label VARCHAR(60),
+      product_label VARCHAR(60),
+      dashboard_subscription_expires_at TIMESTAMPTZ,
       booking_enabled BOOLEAN NOT NULL DEFAULT FALSE,
       business_address TEXT,
       business_hours VARCHAR(160),
@@ -292,6 +300,11 @@ async function createSchema(client) {
       free_delivery_scope VARCHAR(30) NOT NULL DEFAULT 'combined',
       whatsapp_service_limit SMALLINT NOT NULL DEFAULT 3,
       whatsapp_product_limit SMALLINT NOT NULL DEFAULT 3,
+      free_input_tokens INT NOT NULL DEFAULT 100000,
+      free_output_tokens INT NOT NULL DEFAULT 100000,
+      paid_input_tokens INT NOT NULL DEFAULT 0,
+      paid_output_tokens INT NOT NULL DEFAULT 0,
+      free_tokens_reset_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       reset_token_hash TEXT,
       reset_expires_at TIMESTAMPTZ,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -334,6 +347,73 @@ async function createSchema(client) {
     `CREATE INDEX IF NOT EXISTS contacts_admin_idx ON contacts (assigned_admin_id)`,
     `CREATE INDEX IF NOT EXISTS contacts_created_idx ON contacts (created_at DESC)`,
     `CREATE INDEX IF NOT EXISTS contacts_email_lower_idx ON contacts (LOWER(email))`,
+
+    `
+    CREATE TABLE IF NOT EXISTS admin_billing_settings (
+      admin_id INT PRIMARY KEY REFERENCES admins(id) ON DELETE CASCADE,
+      razorpay_key_id VARCHAR(120),
+      razorpay_key_secret VARCHAR(160),
+      charge_enabled BOOLEAN NOT NULL DEFAULT TRUE,
+      free_until TIMESTAMPTZ,
+      input_price_usd_per_1m NUMERIC(12,4),
+      output_price_usd_per_1m NUMERIC(12,4),
+      dashboard_charge_enabled BOOLEAN NOT NULL DEFAULT TRUE,
+      dashboard_service_inr NUMERIC(12,2),
+      dashboard_product_inr NUMERIC(12,2),
+      dashboard_both_inr NUMERIC(12,2),
+      dashboard_booking_inr NUMERIC(12,2),
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+    `,
+    `CREATE INDEX IF NOT EXISTS admin_billing_settings_charge_idx ON admin_billing_settings (charge_enabled)`,
+
+    `
+    CREATE TABLE IF NOT EXISTS admin_ai_usage (
+      id SERIAL PRIMARY KEY,
+      admin_id INT NOT NULL REFERENCES admins(id) ON DELETE CASCADE,
+      contact_id INT REFERENCES contacts(id) ON DELETE SET NULL,
+      model VARCHAR(80),
+      input_tokens INT NOT NULL DEFAULT 0,
+      output_tokens INT NOT NULL DEFAULT 0,
+      billable_input_tokens INT NOT NULL DEFAULT 0,
+      billable_output_tokens INT NOT NULL DEFAULT 0,
+      input_cost_usd NUMERIC(12,6) NOT NULL DEFAULT 0,
+      output_cost_usd NUMERIC(12,6) NOT NULL DEFAULT 0,
+      total_cost_usd NUMERIC(12,6) NOT NULL DEFAULT 0,
+      usd_to_inr_rate NUMERIC(10,4),
+      total_cost_inr NUMERIC(12,4) NOT NULL DEFAULT 0,
+      is_billable BOOLEAN NOT NULL DEFAULT TRUE,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+    `,
+    `CREATE INDEX IF NOT EXISTS admin_ai_usage_admin_created_idx ON admin_ai_usage (admin_id, created_at DESC)`,
+
+    `
+    CREATE TABLE IF NOT EXISTS admin_payment_links (
+      id SERIAL PRIMARY KEY,
+      admin_id INT NOT NULL REFERENCES admins(id) ON DELETE CASCADE,
+      payment_link_id VARCHAR(120) UNIQUE NOT NULL,
+      amount NUMERIC(12,2) NOT NULL DEFAULT 0,
+      base_amount NUMERIC(12,2) NOT NULL DEFAULT 0,
+      maintenance_fee NUMERIC(12,2) NOT NULL DEFAULT 0,
+      currency VARCHAR(10) NOT NULL DEFAULT 'INR',
+      purpose VARCHAR(30) NOT NULL DEFAULT 'payg',
+      input_tokens INT NOT NULL DEFAULT 0,
+      output_tokens INT NOT NULL DEFAULT 0,
+      subscription_months INT NOT NULL DEFAULT 0,
+      discount_pct NUMERIC(5,2) NOT NULL DEFAULT 0,
+      dashboard_monthly_amount NUMERIC(12,2) NOT NULL DEFAULT 0,
+      status VARCHAR(20) NOT NULL DEFAULT 'created'
+        CHECK (status IN ('created', 'paid', 'failed', 'cancelled', 'expired', 'pending')),
+      paid_amount NUMERIC(12,2) NOT NULL DEFAULT 0,
+      paid_at TIMESTAMPTZ,
+      raw_json JSONB,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+    `,
+    `CREATE INDEX IF NOT EXISTS admin_payment_links_admin_idx ON admin_payment_links (admin_id, created_at DESC)`,
 
     `
     CREATE TABLE IF NOT EXISTS messages (

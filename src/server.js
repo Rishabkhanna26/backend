@@ -9,9 +9,11 @@ import {
   claimDueOrderPaymentLinkTimers,
   completeOrderPaymentLinkTimer,
   failOrderPaymentLinkTimer,
+  getEffectiveRazorpayCredentials,
   getOrderById,
   getUserByPhone,
   initializeDbHelpers,
+  refreshAllAdminTokenBalances,
   updateOrder,
 } from "../lib/db-helpers.js";
 import {
@@ -77,6 +79,13 @@ const PAYMENT_LINK_TIMER_POLL_MS = Math.min(
 const PAYMENT_LINK_TIMER_BATCH_SIZE = Math.min(
   Math.max(Number(process.env.PAYMENT_LINK_TIMER_BATCH_SIZE || 10), 1),
   100
+);
+const FREE_TOKEN_REFRESH_ENABLED = String(
+  process.env.FREE_TOKEN_REFRESH_ENABLED || "true"
+).toLowerCase() !== "false";
+const FREE_TOKEN_REFRESH_INTERVAL_MS = Math.min(
+  Math.max(Number(process.env.FREE_TOKEN_REFRESH_INTERVAL_HOURS || 6) * 60 * 60 * 1000, 60 * 60 * 1000),
+  24 * 60 * 60 * 1000
 );
 const PAYMENT_LINK_TIMER_RETRY_MINUTES = Math.min(
   Math.max(Number(process.env.PAYMENT_LINK_TIMER_RETRY_MINUTES || 10), 1),
@@ -236,6 +245,11 @@ const processOnePaymentLinkTimer = async (timer) => {
     throw new Error("Order not found for scheduled payment link");
   }
 
+  const credentials = (await getEffectiveRazorpayCredentials(adminId)) || {};
+  if (!isRazorpayConfigured(credentials)) {
+    throw new Error("Razorpay credentials are missing for this admin");
+  }
+
   const dueAmount = getRemainingAmount(order);
   if (!Number.isFinite(dueAmount) || dueAmount <= 0) {
     await completeOrderPaymentLinkTimer(order.id, { paymentLinkId: "" });
@@ -266,6 +280,7 @@ const processOnePaymentLinkTimer = async (timer) => {
     callbackUrl,
     callbackMethod,
     referenceId: buildPaymentReferenceId({ adminId, orderId: order.id }),
+    credentials,
     customer: {
       name: toTrimmed(order?.customer_name),
       contact: customerPhone,
@@ -318,7 +333,6 @@ const processOnePaymentLinkTimer = async (timer) => {
 
 const processScheduledPaymentLinkTimers = async () => {
   if (!PAYMENT_LINK_TIMER_ENABLED || paymentLinkTimerRunning) return;
-  if (!isRazorpayConfigured()) return;
   paymentLinkTimerRunning = true;
   try {
     const timers = await claimDueOrderPaymentLinkTimers(PAYMENT_LINK_TIMER_BATCH_SIZE);
@@ -564,6 +578,21 @@ if (PAYMENT_LINK_TIMER_ENABLED) {
     pollMs: PAYMENT_LINK_TIMER_POLL_MS,
     batchSize: PAYMENT_LINK_TIMER_BATCH_SIZE,
     retryMinutes: PAYMENT_LINK_TIMER_RETRY_MINUTES,
+  });
+}
+
+if (FREE_TOKEN_REFRESH_ENABLED) {
+  const runTokenRefresh = () => {
+    refreshAllAdminTokenBalances().catch((error) => {
+      logger.error("Free token refresh job failed", {
+        error: error?.message || String(error),
+      });
+    });
+  };
+  runTokenRefresh();
+  setInterval(runTokenRefresh, FREE_TOKEN_REFRESH_INTERVAL_MS);
+  logger.info("Free token refresh job enabled", {
+    intervalMs: FREE_TOKEN_REFRESH_INTERVAL_MS,
   });
 }
 

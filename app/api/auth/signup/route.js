@@ -371,6 +371,8 @@ export async function POST(request) {
             status: createdAdmin.status,
             business_category: createdAdmin.business_category,
             business_type: createdAdmin.business_type,
+            service_label: createdAdmin.service_label,
+            product_label: createdAdmin.product_label,
           });
 
           response.cookies.set({
