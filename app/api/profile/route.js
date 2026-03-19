@@ -151,6 +151,21 @@ export async function PUT(request) {
       businessTypeRaw && allowedBusinessTypes.has(businessTypeRaw)
         ? businessTypeRaw
         : undefined;
+    const currentBusinessType = String(user?.business_type || 'both').trim().toLowerCase();
+
+    if (
+      businessType &&
+      user.admin_tier !== 'super_admin' &&
+      businessType !== currentBusinessType
+    ) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: 'Business type changes require super admin approval. Please submit a request.',
+        },
+        { status: 403 }
+      );
+    }
 
     if (freeDeliveryEnabled && !(Number.isFinite(freeDeliveryMinAmount) && freeDeliveryMinAmount > 0)) {
       return NextResponse.json(

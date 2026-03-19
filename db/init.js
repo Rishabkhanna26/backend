@@ -188,6 +188,7 @@ async function createUpdatedAtInfrastructure(client) {
   const triggerTables = [
     "admins",
     "admin_billing_settings",
+    "business_type_change_requests",
     "signup_verifications",
     "contacts",
     "leads",
@@ -228,6 +229,7 @@ async function recreateSchema(client) {
     "DROP TABLE IF EXISTS tasks CASCADE",
     "DROP TABLE IF EXISTS leads CASCADE",
     "DROP TABLE IF EXISTS messages CASCADE",
+    "DROP TABLE IF EXISTS business_type_change_requests CASCADE",
     "DROP TABLE IF EXISTS catalog_items CASCADE",
     "DROP TABLE IF EXISTS appointments CASCADE",
     "DROP TABLE IF EXISTS orders CASCADE",
@@ -414,6 +416,37 @@ async function createSchema(client) {
     )
     `,
     `CREATE INDEX IF NOT EXISTS admin_payment_links_admin_idx ON admin_payment_links (admin_id, created_at DESC)`,
+
+    `
+    CREATE TABLE IF NOT EXISTS business_type_change_requests (
+      id SERIAL PRIMARY KEY,
+      admin_id INT NOT NULL REFERENCES admins(id) ON DELETE CASCADE,
+      current_business_type VARCHAR(20) NOT NULL
+        CHECK (current_business_type IN ('product', 'service', 'both')),
+      requested_business_type VARCHAR(20) NOT NULL
+        CHECK (requested_business_type IN ('product', 'service', 'both')),
+      reason TEXT,
+      status VARCHAR(20) NOT NULL DEFAULT 'pending'
+        CHECK (status IN ('pending', 'approved', 'rejected', 'cancelled')),
+      monthly_current_inr NUMERIC(12,2),
+      monthly_requested_inr NUMERIC(12,2),
+      monthly_delta_inr NUMERIC(12,2),
+      payment_required BOOLEAN NOT NULL DEFAULT FALSE,
+      payment_status VARCHAR(20) NOT NULL DEFAULT 'unpaid'
+        CHECK (payment_status IN ('unpaid', 'paid', 'waived')),
+      payment_link_id VARCHAR(120),
+      payment_link_url TEXT,
+      payment_paid_amount NUMERIC(12,2),
+      payment_paid_at TIMESTAMPTZ,
+      resolved_by INT REFERENCES admins(id) ON DELETE SET NULL,
+      resolved_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+    `,
+    `CREATE INDEX IF NOT EXISTS business_type_change_requests_admin_idx ON business_type_change_requests (admin_id, created_at DESC)`,
+    `CREATE INDEX IF NOT EXISTS business_type_change_requests_status_idx ON business_type_change_requests (status, created_at DESC)`,
+    `CREATE INDEX IF NOT EXISTS business_type_change_requests_payment_idx ON business_type_change_requests (payment_link_id)`,
 
     `
     CREATE TABLE IF NOT EXISTS messages (

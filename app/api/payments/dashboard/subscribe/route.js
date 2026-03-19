@@ -31,9 +31,9 @@ const buildBillingCallbackUrl = () => {
 };
 
 const resolveDiscountPct = (months) => {
-  if (months === 3) return 5;
-  if (months === 6) return 8;
-  if (months === 12) return 10;
+  if (months === 3) return 8;
+  if (months === 6) return 10;
+  if (months === 12) return 12;
   return 0;
 };
 
@@ -84,11 +84,13 @@ export async function POST(request) {
       );
     }
 
-    const baseAmount = monthlyTotal * months;
+    const baseAmount = baseMonthly * months;
+    const bookingAmount = bookingCharge * months;
     const discountPct = resolveDiscountPct(months);
     const discountAmount = Number((baseAmount * (discountPct / 100)).toFixed(2));
     const discountedBase = Number((baseAmount - discountAmount).toFixed(2));
-    const maintenanceTotals = computeMaintenanceTotals({ baseInr: discountedBase });
+    const discountedSubtotal = Number((discountedBase + bookingAmount).toFixed(2));
+    const maintenanceTotals = computeMaintenanceTotals({ baseInr: discountedSubtotal });
 
     const collectorCreds = (await getEffectiveRazorpayCredentials(user.id)) || {};
     if (!isRazorpayConfigured(collectorCreds)) {

@@ -33,6 +33,8 @@ export async function GET() {
       dashboard_charge_enabled: user.dashboard_charge_enabled,
       dashboard_subscription_active: user.dashboard_subscription_active,
       dashboard_subscription_expires_at: user.dashboard_subscription_expires_at,
+      dashboard_free_until_active: user.dashboard_free_until_active,
+      dashboard_access_grant_active: user.dashboard_access_grant_active,
       business_address: user.business_address,
       business_hours: user.business_hours,
       business_map_url: user.business_map_url,

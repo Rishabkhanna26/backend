@@ -99,8 +99,17 @@ export async function GET() {
     const subscriptionExpiresAt = adminProfile?.dashboard_subscription_expires_at
       ? new Date(adminProfile.dashboard_subscription_expires_at)
       : null;
+    const accessGrantAt = adminProfile?.access_expires_at
+      ? new Date(adminProfile.access_expires_at)
+      : null;
+    const accessGrantActive =
+      accessGrantAt && !Number.isNaN(accessGrantAt.getTime()) && accessGrantAt > new Date();
+    const freeUntilActive =
+      freeUntil && !Number.isNaN(freeUntil.getTime()) && freeUntil > new Date();
     const subscriptionActive =
       user.admin_tier === 'super_admin' ||
+      accessGrantActive ||
+      freeUntilActive ||
       !dashboardChargeEnabled ||
       (subscriptionExpiresAt && !Number.isNaN(subscriptionExpiresAt.getTime()) && subscriptionExpiresAt > new Date());
 

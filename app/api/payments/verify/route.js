@@ -6,6 +6,7 @@ import {
   updateAdminPaymentLinkStatus,
   creditAdminPaidTokens,
   extendAdminDashboardSubscription,
+  markBusinessTypeChangeRequestPaid,
 } from '../../../../lib/db-helpers';
 import { isRazorpayConfigured, verifyRazorpayPaymentLink } from '../../../../lib/razorpay.js';
 
@@ -73,6 +74,18 @@ export async function POST(request) {
       await extendAdminDashboardSubscription({
         adminId: existingLink.admin_id,
         months: existingLink.subscription_months || 1,
+      });
+    }
+
+    if (
+      status === 'paid' &&
+      existingLink?.status !== 'paid' &&
+      existingLink?.purpose === 'business_type_change'
+    ) {
+      await markBusinessTypeChangeRequestPaid({
+        paymentLinkId,
+        paidAmount: verification?.paidAmount || 0,
+        paidAt: verification?.paidAt || null,
       });
     }
 

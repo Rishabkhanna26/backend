@@ -6,12 +6,13 @@ import { initDatabase } from "./init.js";
 const { Client } = pg;
 
 const DUMMY_ADMIN = {
-  name: "Demo Admin",
-  phone: "9000000099",
-  email: "demo.admin@example.com",
+  name: "AARTI SHARMA",
+  phone: "24720908871740",
+  email: "aartiisharma26@gmail.com",
   password: "demo12345",
-  businessCategory: "General Testing",
-  businessType: "both",
+  businessName: "creative code",
+  businessCategory: "creative code",
+  businessType: "product",
 };
 
 const DUMMY_CATALOG = [
@@ -172,10 +173,11 @@ async function getOrCreateSeedAdmin(client) {
         password_hash,
         admin_tier,
         status,
+        business_name,
         business_category,
         business_type
       )
-      VALUES ($1, $2, $3, $4, 'client_admin', 'active', $5, $6)
+      VALUES ($1, $2, $3, $4, 'client_admin', 'active', $5, $6, $7)
       RETURNING id
     `,
     [
@@ -183,6 +185,7 @@ async function getOrCreateSeedAdmin(client) {
       DUMMY_ADMIN.phone,
       DUMMY_ADMIN.email,
       hashPassword(DUMMY_ADMIN.password),
+      DUMMY_ADMIN.businessName,
       DUMMY_ADMIN.businessCategory,
       DUMMY_ADMIN.businessType,
     ]

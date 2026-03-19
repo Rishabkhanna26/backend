@@ -1,5 +1,12 @@
 import { requireAuth } from '../../../../lib/auth-server';
-import { countSuperAdmins, deleteAdminAndData, getAdminById, updateAdminAccess } from '../../../../lib/db-helpers';
+import {
+  approveBusinessTypeChangeRequest,
+  countSuperAdmins,
+  deleteAdminAndData,
+  getAdminById,
+  getPendingBusinessTypeChangeRequest,
+  updateAdminAccess,
+} from '../../../../lib/db-helpers';
 
 export const runtime = 'nodejs';
 
@@ -75,13 +82,36 @@ export async function PATCH(req, context) {
       }
     }
 
-    let access_expires_at = undefined;
+    const currentBusinessType = target.business_type || 'both';
+    const requestedBusinessType =
+      business_type && business_type !== currentBusinessType ? business_type : null;
+    let approvedRequest = null;
+    if (requestedBusinessType) {
+      const pendingRequest = await getPendingBusinessTypeChangeRequest(adminId, requestedBusinessType);
+      if (!pendingRequest) {
+        return Response.json(
+          { success: false, error: 'Business type change requires a pending request.' },
+          { status: 400 }
+        );
+      }
+      if (pendingRequest.payment_required && pendingRequest.payment_status !== 'paid') {
+        return Response.json(
+          { success: false, error: 'Payment is still pending for this business type request.' },
+          { status: 400 }
+        );
+      }
+      approvedRequest = pendingRequest;
+    }
+
     const hasDuration =
       Number.isFinite(access_duration_value) && access_duration_value > 0;
+    const effectiveStatus = hasDuration ? 'active' : status;
 
-    if (status === 'inactive') {
+    let access_expires_at = undefined;
+
+    if (effectiveStatus === 'inactive') {
       access_expires_at = null;
-    } else if (status === 'active' || hasDuration) {
+    } else if (effectiveStatus === 'active' || hasDuration) {
       if (hasDuration) {
         const now = new Date();
         const expires = new Date(now);
@@ -96,10 +126,23 @@ export async function PATCH(req, context) {
       }
     }
 
+    if (approvedRequest) {
+      const approved = await approveBusinessTypeChangeRequest({
+        requestId: approvedRequest.id,
+        resolvedBy: user.id,
+      });
+      if (!approved) {
+        return Response.json(
+          { success: false, error: 'Unable to approve business type request.' },
+          { status: 400 }
+        );
+      }
+    }
+
     const updated = await updateAdminAccess(adminId, {
       admin_tier,
-      status,
-      business_type,
+      status: effectiveStatus,
+      business_type: approvedRequest ? undefined : business_type,
       booking_enabled,
       business_category: typeof business_category === 'string' ? business_category : undefined,
       access_expires_at,
