@@ -5,6 +5,7 @@ import {
   deleteAdminAndData,
   getAdminById,
   getPendingBusinessTypeChangeRequest,
+  rejectBusinessTypeChangeRequest,
   updateAdminAccess,
 } from '../../../../lib/db-helpers';
 
@@ -82,25 +83,40 @@ export async function PATCH(req, context) {
       }
     }
 
+    const allowOverride = user.admin_tier === 'super_admin';
     const currentBusinessType = target.business_type || 'both';
     const requestedBusinessType =
       business_type && business_type !== currentBusinessType ? business_type : null;
     let approvedRequest = null;
+    let rejectedRequest = null;
     if (requestedBusinessType) {
-      const pendingRequest = await getPendingBusinessTypeChangeRequest(adminId, requestedBusinessType);
-      if (!pendingRequest) {
+      const pendingRequest = await getPendingBusinessTypeChangeRequest(adminId);
+      if (pendingRequest) {
+        const matchesRequest =
+          pendingRequest.requested_business_type === requestedBusinessType;
+        const paymentCleared =
+          !pendingRequest.payment_required || pendingRequest.payment_status === 'paid';
+        if (matchesRequest && paymentCleared) {
+          approvedRequest = pendingRequest;
+        } else if (allowOverride) {
+          rejectedRequest = pendingRequest;
+        } else if (!matchesRequest) {
+          return Response.json(
+            { success: false, error: 'Business type change requires a pending request.' },
+            { status: 400 }
+          );
+        } else {
+          return Response.json(
+            { success: false, error: 'Payment is still pending for this business type request.' },
+            { status: 400 }
+          );
+        }
+      } else if (!allowOverride) {
         return Response.json(
           { success: false, error: 'Business type change requires a pending request.' },
           { status: 400 }
         );
       }
-      if (pendingRequest.payment_required && pendingRequest.payment_status !== 'paid') {
-        return Response.json(
-          { success: false, error: 'Payment is still pending for this business type request.' },
-          { status: 400 }
-        );
-      }
-      approvedRequest = pendingRequest;
     }
 
     const hasDuration =
@@ -127,15 +143,27 @@ export async function PATCH(req, context) {
     }
 
     if (approvedRequest) {
-      const approved = await approveBusinessTypeChangeRequest({
-        requestId: approvedRequest.id,
-        resolvedBy: user.id,
-      });
-      if (!approved) {
-        return Response.json(
-          { success: false, error: 'Unable to approve business type request.' },
-          { status: 400 }
-        );
+      try {
+        const approved = await approveBusinessTypeChangeRequest({
+          requestId: approvedRequest.id,
+          resolvedBy: user.id,
+        });
+        if (!approved) {
+          approvedRequest = null;
+        }
+      } catch (error) {
+        approvedRequest = null;
+      }
+    }
+
+    if (rejectedRequest) {
+      try {
+        await rejectBusinessTypeChangeRequest({
+          requestId: rejectedRequest.id,
+          resolvedBy: user.id,
+        });
+      } catch (error) {
+        // ignore rejection failures and proceed with direct update
       }
     }
 
