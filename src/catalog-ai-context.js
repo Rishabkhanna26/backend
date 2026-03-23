@@ -370,6 +370,111 @@ export const buildCatalogListReply = ({
   return lines.join("\n");
 };
 
+export const buildCatalogListPageReply = ({
+  catalog,
+  brandName = "Our Store",
+  itemType = "all",
+  languageCode = "en",
+  pageSize = 10,
+  pageOffset = 0,
+} = {}) => {
+  const services = catalog?.services || [];
+  const products = catalog?.products || [];
+  const safeBrandName = sanitizeText(brandName, 140) || "Our Store";
+  const language = ["hi", "hinglish"].includes(languageCode) ? languageCode : "en";
+
+  if (itemType === "all") {
+    return {
+      text: buildCatalogListReply({
+        catalog,
+        brandName,
+        itemType,
+        languageCode,
+        maxItemsPerType: pageSize,
+      }),
+      hasMore: false,
+      nextOffset: null,
+    };
+  }
+
+  const items = itemType === "service" ? services : products;
+  if (!items.length) {
+    return {
+      text: buildCatalogListReply({
+        catalog,
+        brandName,
+        itemType,
+        languageCode,
+        maxItemsPerType: pageSize,
+      }),
+      hasMore: false,
+      nextOffset: null,
+    };
+  }
+
+  const offset = Math.max(Number(pageOffset) || 0, 0);
+  const limit = Math.max(Number(pageSize) || 10, 1);
+  const visibleItems = items.slice(offset, offset + limit);
+  const hasMore = items.length > offset + limit;
+  const lines = [];
+  const isFollowUp = offset > 0;
+
+  if (language === "hi") {
+    if (isFollowUp) {
+      lines.push(itemType === "product" ? "Aur products yeh hain:" : "Aur services yeh hain:");
+    } else if (itemType === "product") {
+      lines.push("जी हां, हमारे products फिलहाल ये हैं:");
+    } else {
+      lines.push("जी हां, हमारी services फिलहाल ये हैं:");
+    }
+  } else if (language === "hinglish") {
+    if (isFollowUp) {
+      lines.push(itemType === "product" ? "Aur products yeh hain:" : "Aur services yeh hain:");
+    } else if (itemType === "product") {
+      lines.push("Ji haan, hamare products filhaal yeh hain:");
+    } else {
+      lines.push("Ji haan, hamari services filhaal yeh hain:");
+    }
+  } else if (isFollowUp) {
+    lines.push(itemType === "product" ? "Here are more products:" : "Here are more services:");
+  } else if (itemType === "product") {
+    lines.push("Here are our products right now:");
+  } else {
+    lines.push(`Here are our services right now:`);
+  }
+
+  lines.push("");
+  lines.push(itemType === "product" ? "*Products*" : "*Services*");
+  if (!visibleItems.length) {
+    lines.push("- None available right now");
+  } else {
+    visibleItems.forEach((item) => lines.push(buildCatalogReplyLine(item, itemType)));
+  }
+
+  lines.push("");
+  if (hasMore) {
+    if (language === "hi") {
+      lines.push("Aur dekhna hai? *yes* reply karein.");
+    } else if (language === "hinglish") {
+      lines.push("Aur dekhna hai? *yes* reply karein.");
+    } else {
+      lines.push("Want to see more? Reply *yes*.");
+    }
+  } else if (language === "hi") {
+    lines.push("Aap price, details, booking, delivery ya full catalog ke liye pooch sakte hain.");
+  } else if (language === "hinglish") {
+    lines.push("Aap price, details, booking, delivery ya full catalog ke liye pooch sakte hain.");
+  } else {
+    lines.push("Ask me for price, details, booking, delivery, or the full catalog.");
+  }
+
+  return {
+    text: lines.join("\n"),
+    hasMore,
+    nextOffset: hasMore ? offset + limit : null,
+  };
+};
+
 export const buildCatalogPriceReply = ({
   item,
   itemType = "product",

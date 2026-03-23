@@ -43,7 +43,7 @@ import {
   buildCatalogAiContext,
   buildCatalogAvailabilityReply,
   buildCatalogGreetingPreview,
-  buildCatalogListReply,
+  buildCatalogListPageReply,
   buildCatalogLowestPopularityDeflectionReply,
   buildCatalogPopularReply,
   buildCatalogPriceReply,
@@ -425,6 +425,7 @@ const TRACK_ORDER_KEYWORDS = [
 ];
 const YES_KEYWORDS = ["yes", "y", "haan", "ha", "hanji", "haanji", "ok", "okay", "confirm", "1"];
 const NO_KEYWORDS = ["no", "n", "2", "other", "view other", "change"];
+const MORE_KEYWORDS = ["more", "next", "show more", "continue", "aur", "और"];
 const OWNER_MANAGER_URGENT_REASON_PROMPT =
   "Please tell me briefly what this urgent callback is regarding so I can inform the owner right away. You can also type *NO* if you do not want to share the reason.";
 const OPTIONAL_REASON_SKIP_KEYWORDS = ["no", "n", "na", "none", "skip", "no reason"];
@@ -1476,6 +1477,13 @@ const normalizeComparableText = (value) =>
     .toLowerCase()
     .replace(/\s+/g, " ")
     .trim();
+
+const wantsCatalogMore = (value) => {
+  const normalized = normalizeComparableText(value);
+  if (!normalized) return false;
+  if (YES_KEYWORDS.includes(normalized)) return true;
+  return MORE_KEYWORDS.some((keyword) => normalized.includes(keyword));
+};
 
 const sanitizeReplyText = (value, maxLength = 1200) => {
   const cleaned = String(value || "").replace(/\r/g, "").trim();
@@ -6349,6 +6357,43 @@ const handleIncomingMessage = async ({
     const wantsOwnerManager = isOwnerManagerRequest(normalizedMessage);
     const wantsUrgentOwnerManager = wantsOwnerManager && isImmediateCallbackRequest(normalizedMessage);
 
+    const pendingCatalogPagination = user?.data?.catalogListPagination || null;
+    if (!hasActiveGuidedFlow && pendingCatalogPagination) {
+      const wantsMore = wantsCatalogMore(normalizedMessage);
+      if (wantsMore) {
+        const pageSize = Number(pendingCatalogPagination.pageSize) || 10;
+        const pageOffset = Number(pendingCatalogPagination.offset) || 0;
+        const pageReply = buildCatalogListPageReply({
+          catalog,
+          brandName,
+          itemType: pendingCatalogPagination.itemType || "all",
+          languageCode: responseLanguage?.code || "en",
+          pageSize,
+          pageOffset,
+        });
+        if (pageReply?.hasMore && Number.isFinite(pageReply.nextOffset)) {
+          user.data.catalogListPagination = {
+            itemType: pendingCatalogPagination.itemType || "all",
+            pageSize,
+            offset: pageReply.nextOffset,
+          };
+        } else {
+          delete user.data.catalogListPagination;
+        }
+        appendAiConversationHistory(user, "user", messageText);
+        appendAiConversationHistory(user, "assistant", pageReply.text);
+        await sendMessage(pageReply.text);
+        trackLeadCaptureActivity({ user, messageText, phone, assignedAdminId });
+        return;
+      }
+
+      if (NO_KEYWORDS.includes(normalizedMessage)) {
+        delete user.data.catalogListPagination;
+      } else if (!catalogListIntent) {
+        delete user.data.catalogListPagination;
+      }
+    }
+
     if (aiDetectedIntent === "SERVICES") {
       user.data.reason = "Services";
     } else if (aiDetectedIntent === "PRODUCTS") {
@@ -6545,15 +6590,26 @@ const handleIncomingMessage = async ({
     }
 
     if (!hasActiveGuidedFlow && catalogListIntent) {
-      const catalogReply = buildCatalogListReply({
+      const catalogReply = buildCatalogListPageReply({
         catalog,
         brandName,
         itemType: catalogListIntent,
         languageCode: responseLanguage?.code || "en",
+        pageSize: 10,
+        pageOffset: 0,
       });
+      if (catalogReply?.hasMore && Number.isFinite(catalogReply.nextOffset)) {
+        user.data.catalogListPagination = {
+          itemType: catalogListIntent,
+          pageSize: 10,
+          offset: catalogReply.nextOffset,
+        };
+      } else {
+        delete user.data.catalogListPagination;
+      }
       appendAiConversationHistory(user, "user", messageText);
-      appendAiConversationHistory(user, "assistant", catalogReply);
-      await sendMessage(catalogReply);
+      appendAiConversationHistory(user, "assistant", catalogReply.text);
+      await sendMessage(catalogReply.text);
       trackLeadCaptureActivity({ user, messageText, phone, assignedAdminId });
       return;
     }
@@ -7818,6 +7874,54 @@ const handleIncomingMessage = async ({
         await sendMessage(automation.servicesMenuText);
         user.step = "SERVICES_MENU";
         return;
+      }
+
+      const directSpecificMatch = findBestSpecificCatalogMatch({
+        input: messageText,
+        automation,
+      });
+      if (directSpecificMatch?.type === "service") {
+        const matchedService = directSpecificMatch.option || {};
+        const matchedLabel =
+          matchedService.label || matchedService.name || "";
+        const currentLabel = selectedService?.label || "";
+        if (
+          matchedLabel &&
+          normalizeComparableText(matchedLabel) !== normalizeComparableText(currentLabel)
+        ) {
+          user.data.reason = "Services";
+          user.data.serviceType =
+            matchedService.label || matchedService.name || user.data.serviceType;
+          user.data.selectedAppointmentItem = normalizeSelectedAppointmentItem(matchedService);
+
+          if (matchedService?.bookable && (hasCatalogOrderIntent(lower) || lower.includes("book"))) {
+            user.data.reason = matchedService?.bookingItem ? "Booking" : "Appointment";
+            await delay(500);
+            await startAppointmentFlow({
+              user,
+              sendMessage,
+              appointmentType: matchedService.label || matchedService.name,
+              appointmentKind: matchedService?.bookingItem ? "booking" : "service",
+              appointmentItem: matchedService,
+              appointmentSettings,
+            });
+            return;
+          }
+
+          const serviceReply = buildAiServiceDetailsMessage({
+            label: matchedService.label || matchedService.name || "Selected Service",
+            category: matchedService.category || "",
+            description: matchedService.description || "",
+            durationLabel: matchedService.durationLabel || "",
+            priceLabel: matchedService.priceLabel || "",
+            isBookable: matchedService.bookable === true,
+            paymentRequired: matchedService.paymentRequired === true,
+            prompt: matchedService.prompt || "",
+          });
+          await sendMessage(serviceReply);
+          user.step = "SERVICE_CONFIRM_SELECTION";
+          return;
+        }
       }
 
       const wantsConfirmSelection =
