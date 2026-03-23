@@ -6,6 +6,7 @@ import {
 } from '../../../../../lib/db-helpers';
 import { parsePagination } from '../../../../../lib/api-utils';
 import { requireAuth, requireReadAuth } from '../../../../../lib/auth-server';
+import { protectModificationAction } from '../../../../../lib/api-protection';
 import { signAuthToken } from '../../../../../lib/auth';
 
 export const runtime = 'nodejs';
@@ -71,6 +72,8 @@ export async function GET(req, context) {
 export async function POST(req, context) {
   try {
     const authUser = await requireAuth();
+    const guard = await protectModificationAction(authUser, 'send');
+    if (guard) return guard;
     const params = await context.params;
     const userId = Number(params?.id);
     if (!Number.isFinite(userId)) {

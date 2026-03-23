@@ -1,4 +1,5 @@
 import { requireAuth } from '../../../../lib/auth-server';
+import { protectModificationAction } from '../../../../lib/api-protection';
 import { updateRequirementStatus } from '../../../../lib/db-helpers';
 
 const ALLOWED_STATUSES = new Set(['pending', 'in_progress', 'completed']);
@@ -6,6 +7,8 @@ const ALLOWED_STATUSES = new Set(['pending', 'in_progress', 'completed']);
 export async function PATCH(request, context) {
   try {
     const authUser = await requireAuth();
+    const guard = await protectModificationAction(authUser, 'update');
+    if (guard) return guard;
     const params = await context.params;
     const requirementId = Number(params?.id);
     if (!Number.isFinite(requirementId)) {

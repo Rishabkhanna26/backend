@@ -1,6 +1,7 @@
 import { createAppointment, getAppointments, getUserById } from '../../../lib/db-helpers';
 import { parsePagination, parseSearch, parseStatus } from '../../../lib/api-utils';
 import { requireAuth, requireReadAuth } from '../../../lib/auth-server';
+import { protectModificationAction } from '../../../lib/api-protection';
 import { hasAppointmentAccess, hasBookingAccess, hasServiceAccess } from '../../../lib/business.js';
 
 const ALLOWED_STATUSES = new Set(['booked', 'completed', 'cancelled']);
@@ -23,10 +24,13 @@ export async function GET(req) {
     const { limit, offset } = parsePagination(searchParams);
     const search = parseSearch(searchParams);
     const status = parseStatus(searchParams);
+    const kindParam = String(searchParams?.get('kind') || '').trim().toLowerCase();
+    const kind = ALLOWED_APPOINTMENT_KINDS.has(kindParam) ? kindParam : 'all';
     const adminScopeId = authUser.admin_tier === 'super_admin' ? null : authUser.id;
     const appointments = await getAppointments(adminScopeId, {
       search,
       status,
+      kind,
       limit: limit + 1,
       offset,
     });
@@ -55,6 +59,8 @@ export async function GET(req) {
 export async function POST(req) {
   try {
     const authUser = await requireAuth();
+    const guard = await protectModificationAction(authUser, 'create');
+    if (guard) return guard;
     if (!hasAppointmentAccess(authUser)) {
       return Response.json(
         { success: false, error: 'Appointments are disabled for this admin.' },

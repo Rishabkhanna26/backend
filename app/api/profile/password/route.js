@@ -1,11 +1,14 @@
 import { NextResponse } from 'next/server';
 import { requireAuth } from '../../../../lib/auth-server';
+import { protectModificationAction } from '../../../../lib/api-protection';
 import { getConnection } from '../../../../lib/db-helpers';
 import { hashPassword, verifyPassword } from '../../../../lib/auth';
 
 export async function POST(request) {
   try {
     const user = await requireAuth();
+    const guard = await protectModificationAction(user, 'update');
+    if (guard) return guard;
     const body = await request.json();
     const currentPassword = String(body?.currentPassword || '');
     const newPassword = String(body?.newPassword || '');

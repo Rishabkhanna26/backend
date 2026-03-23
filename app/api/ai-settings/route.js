@@ -1,4 +1,5 @@
 import { requireAuth } from '../../../lib/auth-server';
+import { protectModificationAction } from '../../../lib/api-protection';
 import { getAdminAISettings, updateAdminAISettings } from '../../../lib/db-helpers';
 
 export const runtime = 'nodejs';
@@ -52,6 +53,8 @@ export async function GET() {
 export async function PUT(request) {
   try {
     const user = await requireAuth();
+    const guard = await protectModificationAction(user, 'update');
+    if (guard) return guard;
     const body = await request.json();
     const ai_enabled = typeof body.ai_enabled === 'boolean' ? body.ai_enabled : undefined;
     const ai_prompt = typeof body.ai_prompt === 'string' ? body.ai_prompt : undefined;

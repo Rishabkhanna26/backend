@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { requireAuth } from '../../../../lib/auth-server';
+import { protectModificationAction } from '../../../../lib/api-protection';
 import { signAuthToken } from '../../../../lib/auth';
 
 const BACKEND_TOKEN_TTL_SECONDS = 10 * 60;
@@ -7,6 +8,8 @@ const BACKEND_TOKEN_TTL_SECONDS = 10 * 60;
 export async function GET() {
   try {
     const user = await requireAuth();
+    const guard = await protectModificationAction(user, 'use');
+    if (guard) return guard;
     const expiresAt = Date.now() + BACKEND_TOKEN_TTL_SECONDS * 1000;
     const token = signAuthToken(
       {

@@ -14,6 +14,15 @@ import { createRazorpayPaymentLink, isRazorpayConfigured } from '../../../../../
 export const runtime = 'nodejs';
 
 const toTrimmed = (value) => String(value || '').trim();
+const parseBoolean = (value, fallback = null) => {
+  if (value === true || value === false) return value;
+  if (typeof value === 'string') {
+    const normalized = value.trim().toLowerCase();
+    if (['true', '1', 'yes', 'on'].includes(normalized)) return true;
+    if (['false', '0', 'no', 'off'].includes(normalized)) return false;
+  }
+  return fallback;
+};
 
 const buildBillingCallbackUrl = () => {
   const explicit = toTrimmed(process.env.RAZORPAY_BILLING_CALLBACK_URL);
@@ -66,8 +75,15 @@ export async function POST(request) {
 
     const adminProfile = await getAdminById(user.id);
     const rates = await getDashboardChargeRates();
-    const businessType = normalizeBusinessType(adminProfile?.business_type, 'both');
-    const bookingEnabled = Boolean(adminProfile?.booking_enabled);
+    const requestedType = toTrimmed(body?.business_type).toLowerCase();
+    const normalizedRequestedType = normalizeBusinessType(requestedType, null);
+    const businessType = normalizedRequestedType || normalizeBusinessType(adminProfile?.business_type, 'both');
+    const requestedBooking = parseBoolean(body?.booking_enabled, null);
+    const bookingEnabled = businessType === 'product'
+      ? false
+      : requestedBooking === null
+      ? Boolean(adminProfile?.booking_enabled)
+      : Boolean(requestedBooking);
     const baseMonthly =
       businessType === 'service'
         ? rates.service_inr
@@ -123,6 +139,8 @@ export async function POST(request) {
         discount_pct: String(discountPct),
         base_amount_inr: String(maintenanceTotals.baseInr),
         maintenance_fee_inr: String(maintenanceTotals.maintenanceFeeInr),
+        profile_type: businessType,
+        booking_enabled: bookingEnabled ? 'true' : 'false',
       },
     });
 

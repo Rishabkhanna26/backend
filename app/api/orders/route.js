@@ -1,4 +1,5 @@
 import { requireAuth, requireReadAuth } from '../../../lib/auth-server';
+import { protectModificationAction } from '../../../lib/api-protection';
 import { parsePagination } from '../../../lib/api-utils';
 import { createOrder, getOrders } from '../../../lib/db-helpers';
 import { hasProductAccess } from '../../../lib/business.js';
@@ -60,6 +61,8 @@ export async function GET(request) {
 export async function POST(request) {
   try {
     const user = await requireAuth();
+    const guard = await protectModificationAction(user, 'create');
+    if (guard) return guard;
     if (!hasProductAccess(user)) {
       return Response.json(
         { success: false, error: 'Orders are disabled for this business type.' },

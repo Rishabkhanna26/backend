@@ -1,4 +1,5 @@
 import { requireAuth } from '../../../lib/auth-server';
+import { protectModificationAction } from '../../../lib/api-protection';
 import { createBroadcast, getAllBroadcasts, getBroadcastStats } from '../../../lib/db-helpers';
 import { parsePagination, parseSearch } from '../../../lib/api-utils';
 
@@ -55,6 +56,8 @@ export async function GET(request) {
 export async function POST(request) {
   try {
     const user = await requireAuth();
+    const guard = await protectModificationAction(user, 'create');
+    if (guard) return guard;
     const body = await request.json();
     const title = String(body?.title || '').trim();
     const message = String(body?.message || '').trim();

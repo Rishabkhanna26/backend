@@ -1,4 +1,5 @@
 import { requireAuth, requireReadAuth } from '../../../../lib/auth-server';
+import { protectModificationAction } from '../../../../lib/api-protection';
 import { deleteCatalogItem, getCatalogItemById, updateCatalogItem } from '../../../../lib/db-helpers';
 import { hasBookingAccess } from '../../../../lib/business.js';
 import { resolveBookingCategoryLabel } from '../../../../lib/booking.js';
@@ -94,6 +95,8 @@ export async function GET(request, { params }) {
 export async function PUT(request, { params }) {
   try {
     const user = await requireAuth();
+    const guard = await protectModificationAction(user, 'update');
+    if (guard) return guard;
     if (!hasBookingAccess(user)) {
       return Response.json({ success: false, error: 'Booking section is disabled.' }, { status: 403 });
     }
@@ -197,6 +200,8 @@ export async function PUT(request, { params }) {
 export async function DELETE(request, { params }) {
   try {
     const user = await requireAuth();
+    const guard = await protectModificationAction(user, 'delete');
+    if (guard) return guard;
     if (!hasBookingAccess(user)) {
       return Response.json({ success: false, error: 'Booking section is disabled.' }, { status: 403 });
     }

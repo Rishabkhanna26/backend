@@ -49,13 +49,6 @@ const buildPlaceholderPhone = (provider, subject) => {
   return sanitizePhone(numeric, { min: 10, max: 14 }) || '9000000000';
 };
 
-const isAccessExpired = (value) => {
-  if (!value) return false;
-  const time = new Date(value).getTime();
-  if (!Number.isFinite(time)) return false;
-  return time <= Date.now();
-};
-
 export async function GET(request) {
   const url = new URL(request.url);
   const code = url.searchParams.get('code');
@@ -135,6 +128,14 @@ export async function GET(request) {
 
     const connection = await getConnection();
     try {
+      await connection.query(
+        `UPDATE admins
+         SET status = 'inactive'
+         WHERE status = 'active'
+           AND access_expires_at IS NOT NULL
+           AND access_expires_at <= NOW()`
+      );
+
       const [existing] = await connection.query(
         `SELECT id, name, email, phone, admin_tier, status,
                 business_category, business_type, booking_enabled, access_expires_at
@@ -165,8 +166,8 @@ export async function GET(request) {
         admin = rows[0];
       }
 
-      if (!admin || isAccessExpired(admin.access_expires_at)) {
-        const response = NextResponse.redirect(buildRedirectUrl(request, '/login?oauth=access_expired'));
+      if (!admin) {
+        const response = NextResponse.redirect(buildRedirectUrl(request, '/login?oauth=failed'));
         clearStateCookie(response);
         return response;
       }

@@ -1,5 +1,6 @@
 import { getUserById, updateUserAutomation } from '../../../../lib/db-helpers';
 import { requireAuth, requireReadAuth } from '../../../../lib/auth-server';
+import { protectModificationAction } from '../../../../lib/api-protection';
 
 export const runtime = 'nodejs';
 
@@ -30,6 +31,8 @@ export async function GET(req, context) {
 export async function PATCH(req, context) {
   try {
     const authUser = await requireAuth();
+    const guard = await protectModificationAction(authUser, 'update');
+    if (guard) return guard;
     const params = await context.params;
     const userId = Number(params?.id);
     if (!Number.isFinite(userId)) {

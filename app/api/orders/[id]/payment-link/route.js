@@ -1,4 +1,5 @@
 import { requireAuth } from '../../../../../lib/auth-server';
+import { protectModificationAction } from '../../../../../lib/api-protection';
 import {
   getEffectiveRazorpayCredentials,
   getOrderById,
@@ -120,6 +121,8 @@ const buildPaymentReminderMessage = ({ order = {}, dueAmount = 0, currency = 'IN
 export async function POST(request, context) {
   try {
     const authUser = await requireAuth();
+    const guard = await protectModificationAction(authUser, 'create');
+    if (guard) return guard;
     if (!hasProductAccess(authUser)) {
       return Response.json(
         { success: false, error: 'Orders are disabled for this business type.' },

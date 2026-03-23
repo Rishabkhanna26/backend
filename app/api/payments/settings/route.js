@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { requireAuth, requireReadAuth } from '../../../../lib/auth-server';
+import { protectModificationAction } from '../../../../lib/api-protection';
 import { getAdminBillingSettings, upsertAdminBillingSettings } from '../../../../lib/db-helpers';
 
 export const runtime = 'nodejs';
@@ -28,6 +29,8 @@ export async function GET() {
 export async function PUT(request) {
   try {
     const user = await requireAuth();
+    const guard = await protectModificationAction(user, 'update');
+    if (guard) return guard;
     const body = await request.json();
     const payload = {};
     if (Object.prototype.hasOwnProperty.call(body, 'razorpay_key_id')) {

@@ -1,6 +1,7 @@
 import { addUser, getAllUsers, getUserById, getUserByPhone } from '../../../lib/db-helpers';
 import { parsePagination, parseSearch } from '../../../lib/api-utils';
 import { requireAuth, requireReadAuth } from '../../../lib/auth-server';
+import { protectModificationAction } from '../../../lib/api-protection';
 import { sanitizeEmail, sanitizeNameUpper, sanitizePhone } from '../../../lib/sanitize.js';
 
 export async function GET(req) {
@@ -38,6 +39,8 @@ export async function GET(req) {
 export async function POST(req) {
   try {
     const authUser = await requireAuth();
+    const guard = await protectModificationAction(authUser, 'create');
+    if (guard) return guard;
     const body = await req.json().catch(() => ({}));
     const name = sanitizeNameUpper(body?.name);
     const email = sanitizeEmail(body?.email);

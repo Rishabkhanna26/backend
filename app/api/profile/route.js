@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import fs from 'fs/promises';
 import path from 'path';
 import { requireAuth, requireReadAuth } from '../../../lib/auth-server';
+import { protectModificationAction } from '../../../lib/api-protection';
 import { signAuthToken } from '../../../lib/auth';
 import { getAdminById, updateAdminProfile } from '../../../lib/db-helpers';
 import { sanitizeEmail, sanitizeNameUpper, sanitizeText } from '../../../lib/sanitize.js';
@@ -106,6 +107,8 @@ export async function GET(request) {
 export async function PUT(request) {
   try {
     const user = await requireAuth();
+    const guard = await protectModificationAction(user, 'update');
+    if (guard) return guard;
     const body = await request.json();
     const name = typeof body.name === 'string' ? sanitizeNameUpper(body.name) : undefined;
     const email = typeof body.email === 'string' ? sanitizeEmail(body.email) || '' : undefined;

@@ -1,4 +1,5 @@
 import { requireAuth, requireReadAuth } from '../../../lib/auth-server';
+import { protectModificationAction } from '../../../lib/api-protection';
 import { createCatalogItem, getCatalogItems } from '../../../lib/db-helpers';
 import { parsePagination, parseSearch, parseStatus } from '../../../lib/api-utils';
 import { hasBookingAccess } from '../../../lib/business.js';
@@ -101,6 +102,8 @@ export async function GET(request) {
 export async function POST(request) {
   try {
     const user = await requireAuth();
+    const guard = await protectModificationAction(user, 'create');
+    if (guard) return guard;
     if (!hasBookingAccess(user)) {
       return Response.json({ success: false, error: 'Booking section is disabled.' }, { status: 403 });
     }

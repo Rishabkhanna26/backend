@@ -1,4 +1,5 @@
 import { requireAuth, requireReadAuth } from '../../../../lib/auth-server';
+import { protectModificationAction } from '../../../../lib/api-protection';
 import { deleteCatalogItem, getCatalogItemById, updateCatalogItem } from '../../../../lib/db-helpers';
 import { canUseCatalogItemType } from '../../../../lib/business.js';
 
@@ -81,6 +82,8 @@ export async function GET(request, { params }) {
 export async function PUT(request, { params }) {
   try {
     const user = await requireAuth();
+    const guard = await protectModificationAction(user, 'update');
+    if (guard) return guard;
     const resolvedParams = await Promise.resolve(params);
     const itemId = parseId(resolvedParams?.id);
     if (!itemId) {
@@ -241,6 +244,8 @@ export async function PUT(request, { params }) {
 export async function DELETE(request, { params }) {
   try {
     const user = await requireAuth();
+    const guard = await protectModificationAction(user, 'delete');
+    if (guard) return guard;
     const resolvedParams = await Promise.resolve(params);
     const itemId = parseId(resolvedParams?.id);
     if (!itemId) {

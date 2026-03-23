@@ -6,8 +6,10 @@ import {
   updateAdminPaymentLinkStatus,
   creditAdminPaidTokens,
   extendAdminDashboardSubscription,
+  updateAdminAccess,
   markBusinessTypeChangeRequestPaid,
 } from '../../../../lib/db-helpers';
+import { normalizeBusinessType } from '../../../../lib/business.js';
 import { isRazorpayConfigured, verifyRazorpayPaymentLink } from '../../../../lib/razorpay.js';
 
 export const runtime = 'nodejs';
@@ -17,6 +19,14 @@ const normalizeStatus = (value) => {
   if (['paid', 'cancelled', 'expired', 'failed', 'created'].includes(status)) return status;
   if (status === 'partially_paid') return 'pending';
   return 'pending';
+};
+
+const parseNoteBoolean = (value) => {
+  if (value === true || value === false) return value;
+  const normalized = String(value || '').trim().toLowerCase();
+  if (['true', '1', 'yes', 'on'].includes(normalized)) return true;
+  if (['false', '0', 'no', 'off'].includes(normalized)) return false;
+  return null;
 };
 
 export async function POST(request) {
@@ -75,6 +85,25 @@ export async function POST(request) {
         adminId: existingLink.admin_id,
         months: existingLink.subscription_months || 1,
       });
+      const notes = verification?.raw?.link?.notes || {};
+      const normalizedType = normalizeBusinessType(notes?.profile_type, null);
+      const bookingFromNotes = parseNoteBoolean(notes?.booking_enabled);
+      const updates = {};
+      if (normalizedType) {
+        updates.business_type = normalizedType;
+      }
+      if (normalizedType === 'product') {
+        updates.booking_enabled = false;
+      } else if (bookingFromNotes !== null) {
+        updates.booking_enabled = bookingFromNotes;
+      }
+      if (Object.keys(updates).length > 0) {
+        try {
+          await updateAdminAccess(existingLink.admin_id, updates);
+        } catch (_error) {
+          // Ignore profile update failures after successful payment verification.
+        }
+      }
     }
 
     if (

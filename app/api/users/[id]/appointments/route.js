@@ -28,8 +28,11 @@ export async function GET(req, context) {
     const { searchParams } = new URL(req.url);
     const { limit, offset } = parsePagination(searchParams, { defaultLimit: 10, maxLimit: 50 });
     const status = parseStatus(searchParams);
+    const kindParam = String(searchParams?.get('kind') || '').trim().toLowerCase();
+    const kind = kindParam === 'booking' || kindParam === 'service' ? kindParam : 'all';
     const appointments = await getAppointmentsForUser(userId, adminScopeId, {
       status,
+      kind,
       limit: limit + 1,
       offset,
     });

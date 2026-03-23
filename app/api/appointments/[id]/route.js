@@ -1,5 +1,6 @@
 import { requireAuth } from '../../../../lib/auth-server';
-import { updateAppointment } from '../../../../lib/db-helpers';
+import { protectModificationAction } from '../../../../lib/api-protection';
+import { deleteAppointment, updateAppointment } from '../../../../lib/db-helpers';
 import { hasAppointmentAccess, hasBookingAccess, hasServiceAccess } from '../../../../lib/business.js';
 
 const ALLOWED_STATUSES = new Set(['booked', 'completed', 'cancelled']);
@@ -9,6 +10,8 @@ const ALLOWED_APPOINTMENT_KINDS = new Set(['service', 'booking']);
 export async function PATCH(request, context) {
   try {
     const authUser = await requireAuth();
+    const guard = await protectModificationAction(authUser, 'update');
+    if (guard) return guard;
     if (!hasAppointmentAccess(authUser)) {
       return Response.json(
         { success: false, error: 'Appointments are disabled for this admin.' },
@@ -94,6 +97,40 @@ export async function PATCH(request, context) {
     }
 
     return Response.json({ success: true, data: updated });
+  } catch (error) {
+    if (error.status === 401) {
+      return Response.json({ success: false, error: 'Unauthorized' }, { status: 401 });
+    }
+    return Response.json({ success: false, error: error.message }, { status: 500 });
+  }
+}
+
+export async function DELETE(request, context) {
+  try {
+    const authUser = await requireAuth();
+    const guard = await protectModificationAction(authUser, 'delete');
+    if (guard) return guard;
+    if (!hasAppointmentAccess(authUser)) {
+      return Response.json(
+        { success: false, error: 'Appointments are disabled for this admin.' },
+        { status: 403 }
+      );
+    }
+    const params = await context.params;
+    const appointmentId = Number(params?.id);
+    if (!Number.isFinite(appointmentId)) {
+      return Response.json({ success: false, error: 'Invalid appointment id' }, { status: 400 });
+    }
+
+    const adminScopeId = authUser.admin_tier === 'super_admin' ? null : authUser.id;
+    const result = await deleteAppointment(appointmentId, adminScopeId);
+    if (!result?.success) {
+      const errorMessage = result?.error || 'Appointment not found';
+      const status = errorMessage === 'Appointment not found' ? 404 : 400;
+      return Response.json({ success: false, error: errorMessage }, { status });
+    }
+
+    return Response.json({ success: true });
   } catch (error) {
     if (error.status === 401) {
       return Response.json({ success: false, error: 'Unauthorized' }, { status: 401 });

@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { requireAuth } from '../../../../lib/auth-server';
+import { protectModificationAction } from '../../../../lib/api-protection';
 import {
   createAdminPaymentLinkRecord,
   createBusinessTypeChangeRequest,
@@ -56,6 +57,8 @@ export async function GET() {
 export async function POST(request) {
   try {
     const user = await requireAuth();
+    const guard = await protectModificationAction(user, 'request');
+    if (guard) return guard;
     const body = await request.json().catch(() => ({}));
     const requestedTypeRaw =
       typeof body?.business_type === 'string'

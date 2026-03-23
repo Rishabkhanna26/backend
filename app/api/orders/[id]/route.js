@@ -1,4 +1,5 @@
 import { requireAuth } from '../../../../lib/auth-server';
+import { protectModificationAction } from '../../../../lib/api-protection';
 import {
   deleteOrder,
   getEffectiveRazorpayCredentials,
@@ -118,6 +119,8 @@ const buildVerifiedPaymentNotes = ({
 export async function PATCH(request, context) {
   try {
     const authUser = await requireAuth();
+    const guard = await protectModificationAction(authUser, 'update');
+    if (guard) return guard;
     if (!hasProductAccess(authUser)) {
       return Response.json(
         { success: false, error: 'Orders are disabled for this business type.' },
@@ -368,6 +371,8 @@ export async function PATCH(request, context) {
 export async function DELETE(request, context) {
   try {
     const authUser = await requireAuth();
+    const guard = await protectModificationAction(authUser, 'delete');
+    if (guard) return guard;
     if (!hasProductAccess(authUser)) {
       return Response.json(
         { success: false, error: 'Orders are disabled for this business type.' },

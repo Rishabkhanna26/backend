@@ -1,6 +1,7 @@
 import fs from 'fs/promises';
 import path from 'path';
 import { requireAuth } from '../../../../lib/auth-server';
+import { protectModificationAction } from '../../../../lib/api-protection';
 
 export const runtime = 'nodejs';
 
@@ -30,6 +31,8 @@ const removeExistingProfiles = async (folderPath, keepExt) => {
 export async function POST(request) {
   try {
     const user = await requireAuth();
+    const guard = await protectModificationAction(user, 'update');
+    if (guard) return guard;
     const formData = await request.formData();
     const file = formData.get('photo');
 

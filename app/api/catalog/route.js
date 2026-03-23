@@ -1,4 +1,5 @@
 import { requireAuth, requireReadAuth } from '../../../lib/auth-server';
+import { protectModificationAction } from '../../../lib/api-protection';
 import { createCatalogItem, getCatalogItems } from '../../../lib/db-helpers';
 import { parsePagination, parseSearch, parseStatus } from '../../../lib/api-utils';
 import { canUseCatalogItemType } from '../../../lib/business.js';
@@ -105,6 +106,8 @@ export async function GET(request) {
 export async function POST(request) {
   try {
     const user = await requireAuth();
+    const guard = await protectModificationAction(user, 'create');
+    if (guard) return guard;
     const body = await request.json();
     const itemType = String(body?.item_type || body?.type || '').trim().toLowerCase();
     const name = String(body?.name || '').trim();
