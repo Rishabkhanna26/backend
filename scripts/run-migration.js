@@ -21,7 +21,7 @@ import pg from 'pg';
 import logger from '../config/logger.js';
 
 // Load environment variables
-dotenv.config();
+dotenv.config({ quiet: true });
 
 const { Pool } = pg;
 const __filename = fileURLToPath(import.meta.url);

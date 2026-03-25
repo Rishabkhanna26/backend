@@ -168,32 +168,68 @@ export const buildCatalogAiContext = ({ catalog, maxItemsPerType = 25 } = {}) =>
   ].join("\n");
 };
 
-const buildGreetingPreviewLine = (item, itemType) => {
-  const name = sanitizeText(item?.name || "Unnamed item", 120);
+const buildCatalogItemMetaParts = (item, itemType) => {
   const details = [];
   const priceLabel = normalizePriceLabelInr(item?.price_label);
   const durationLabel = formatCatalogDuration(item);
   const packLabel = formatCatalogPack(item);
 
-  if (priceLabel) details.push(priceLabel);
-  if (itemType === "service" && durationLabel) details.push(durationLabel);
+  if (priceLabel) details.push(`Price: ${priceLabel}`);
+  if (itemType === "service" && durationLabel) details.push(`Duration: ${durationLabel}`);
   if (itemType === "product" && packLabel) details.push(`Pack: ${packLabel}`);
-
-  return `- ${name}${details.length ? ` (${details.join(", ")})` : ""}`;
+  return details;
 };
 
-const buildCatalogReplyLine = (item, itemType) => {
+const buildCatalogItemBlockLines = (item, itemType, index, { includeDescription = false } = {}) => {
   const name = sanitizeText(item?.name || "Unnamed item", 120);
-  const details = [];
-  const priceLabel = normalizePriceLabelInr(item?.price_label);
-  const durationLabel = formatCatalogDuration(item);
-  const packLabel = formatCatalogPack(item);
+  const meta = buildCatalogItemMetaParts(item, itemType);
+  const description = includeDescription ? sanitizeText(item?.description, 220) : "";
+  const lines = [`${index}. *${name}*`];
 
-  if (priceLabel) details.push(priceLabel);
-  if (itemType === "service" && durationLabel) details.push(durationLabel);
-  if (itemType === "product" && packLabel) details.push(`Pack: ${packLabel}`);
+  if (meta.length) {
+    lines.push(`   ${meta.join(" | ")}`);
+  }
+  if (description) {
+    lines.push(`   ${description}`);
+  }
+  return lines;
+};
 
-  return `- *${name}*${details.length ? ` (${details.join(", ")})` : ""}`;
+const buildCatalogSectionLines = ({
+  items,
+  title = "",
+  itemType,
+  maxItems = 8,
+  includeDescription = false,
+} = {}) => {
+  const visibleItems = (items || []).slice(0, maxItems);
+  const hiddenCount = Math.max((items || []).length - visibleItems.length, 0);
+  const lines = [];
+
+  if (title) {
+    lines.push(title);
+  }
+
+  if (!visibleItems.length) {
+    lines.push("_None available right now_");
+    return lines;
+  }
+
+  visibleItems.forEach((item, index) => {
+    if (index > 0) lines.push("");
+    lines.push(
+      ...buildCatalogItemBlockLines(item, itemType, index + 1, {
+        includeDescription,
+      })
+    );
+  });
+
+  if (hiddenCount > 0) {
+    lines.push("");
+    lines.push(`_+${hiddenCount} more available_`);
+  }
+
+  return lines;
 };
 
 const resolveCatalogItemPriceLabel = (item) =>
@@ -208,41 +244,13 @@ const resolveCatalogItemPackLabel = (item) =>
 const resolveCatalogItemPrompt = (item) =>
   sanitizeText(item?.prompt || item?.details_prompt, 220);
 
-const buildCatalogAvailabilityPreview = ({ items, itemType, maxItems = 4 }) => {
-  const visibleItems = (items || []).slice(0, maxItems);
-  if (!visibleItems.length) return "";
-
-  const names = visibleItems
-    .map((item) => sanitizeText(item?.name || item?.label, 80))
-    .filter(Boolean);
-  if (!names.length) return "";
-
-  const label =
-    itemType === "product"
-      ? "Available products"
-      : itemType === "service"
-        ? "Available services"
-        : "Available offerings";
-
-  return `*${label}:* ${names.join(", ")}`;
-};
-
 const buildCatalogReplySections = ({ items, title, itemType, maxItems = 8 }) => {
-  const visibleItems = (items || []).slice(0, maxItems);
-  const hiddenCount = Math.max((items || []).length - visibleItems.length, 0);
-  const lines = [title];
-
-  if (!visibleItems.length) {
-    lines.push("- None available right now");
-  } else {
-    visibleItems.forEach((item) => lines.push(buildCatalogReplyLine(item, itemType)));
-  }
-
-  if (hiddenCount > 0) {
-    lines.push(`- +${hiddenCount} more`);
-  }
-
-  return lines;
+  return buildCatalogSectionLines({
+    items,
+    title,
+    itemType,
+    maxItems,
+  });
 };
 
 export const findCatalogItemByPrice = ({
@@ -285,33 +293,42 @@ export const buildCatalogListReply = ({
 
   if (language === "hi") {
     if (itemType === "product") {
-      lines.push("जी हां, हमारे products फिलहाल ये हैं:");
+      lines.push("*Product Catalog*");
+      lines.push("यह products अभी available हैं:");
     } else if (itemType === "service") {
-      lines.push("जी हां, हमारी services फिलहाल ये हैं:");
+      lines.push("*Service Catalog*");
+      lines.push("यह services अभी available हैं:");
     } else {
-      lines.push(`जी हां, ${safeBrandName} में फिलहाल हम ये offerings देते हैं:`);
+      lines.push(`*${safeBrandName} Catalog*`);
+      lines.push("यह हमारे available offerings हैं:");
     }
   } else if (language === "hinglish") {
     if (itemType === "product") {
-      lines.push("Ji haan, hamare products filhaal yeh hain:");
+      lines.push("*Product Catalog*");
+      lines.push("Yeh products abhi available hain:");
     } else if (itemType === "service") {
-      lines.push("Ji haan, hamari services filhaal yeh hain:");
+      lines.push("*Service Catalog*");
+      lines.push("Yeh services abhi available hain:");
     } else {
-      lines.push(`Ji haan, ${safeBrandName} mein ham filhaal yeh offerings dete hain:`);
+      lines.push(`*${safeBrandName} Catalog*`);
+      lines.push("Yeh hamare available offerings hain:");
     }
   } else if (itemType === "product") {
-    lines.push("Here are our products right now:");
+    lines.push("*Product Catalog*");
+    lines.push("Here are the available products right now:");
   } else if (itemType === "service") {
-    lines.push("Here are our services right now:");
+    lines.push("*Service Catalog*");
+    lines.push("Here are the available services right now:");
   } else {
-    lines.push(`Here are the main things we offer at ${safeBrandName}:`);
+    lines.push(`*${safeBrandName} Catalog*`);
+    lines.push("Here are the main offerings available right now:");
   }
 
   if (itemType === "product") {
     lines.push("");
     lines.push(...buildCatalogReplySections({
       items: products,
-      title: "*Products*",
+      title: "",
       itemType: "product",
       maxItems: maxItemsPerType,
     }));
@@ -319,7 +336,7 @@ export const buildCatalogListReply = ({
     lines.push("");
     lines.push(...buildCatalogReplySections({
       items: services,
-      title: "*Services*",
+      title: "",
       itemType: "service",
       maxItems: maxItemsPerType,
     }));
@@ -360,11 +377,11 @@ export const buildCatalogListReply = ({
 
   lines.push("");
   if (language === "hi") {
-    lines.push("Aap price, details, booking, delivery ya full catalog ke liye pooch sakte hain.");
+    lines.push("Aap item ka naam bhejkar price, details, booking, delivery ya full catalog pooch sakte hain.");
   } else if (language === "hinglish") {
-    lines.push("Aap price, details, booking, delivery ya full catalog ke liye pooch sakte hain.");
+    lines.push("Aap item ka naam bhejkar price, details, booking, delivery ya full catalog pooch sakte hain.");
   } else {
-    lines.push("Ask me for price, details, booking, delivery, or the full catalog.");
+    lines.push("Reply with any item name for price, details, booking, delivery, or the full catalog.");
   }
 
   return lines.join("\n");
@@ -421,51 +438,62 @@ export const buildCatalogListPageReply = ({
 
   if (language === "hi") {
     if (isFollowUp) {
-      lines.push(itemType === "product" ? "Aur products yeh hain:" : "Aur services yeh hain:");
+      lines.push(itemType === "product" ? "*More Products*" : "*More Services*");
+      lines.push(itemType === "product" ? "यह अगले available products हैं:" : "यह अगली available services हैं:");
     } else if (itemType === "product") {
-      lines.push("जी हां, हमारे products फिलहाल ये हैं:");
+      lines.push("*Product Catalog*");
+      lines.push("यह products अभी available हैं:");
     } else {
-      lines.push("जी हां, हमारी services फिलहाल ये हैं:");
+      lines.push("*Service Catalog*");
+      lines.push("यह services अभी available हैं:");
     }
   } else if (language === "hinglish") {
     if (isFollowUp) {
-      lines.push(itemType === "product" ? "Aur products yeh hain:" : "Aur services yeh hain:");
+      lines.push(itemType === "product" ? "*More Products*" : "*More Services*");
+      lines.push(itemType === "product" ? "Yeh next available products hain:" : "Yeh next available services hain:");
     } else if (itemType === "product") {
-      lines.push("Ji haan, hamare products filhaal yeh hain:");
+      lines.push("*Product Catalog*");
+      lines.push("Yeh products abhi available hain:");
     } else {
-      lines.push("Ji haan, hamari services filhaal yeh hain:");
+      lines.push("*Service Catalog*");
+      lines.push("Yeh services abhi available hain:");
     }
   } else if (isFollowUp) {
-    lines.push(itemType === "product" ? "Here are more products:" : "Here are more services:");
+    lines.push(itemType === "product" ? "*More Products*" : "*More Services*");
+    lines.push(itemType === "product" ? "Here are the next available products:" : "Here are the next available services:");
   } else if (itemType === "product") {
-    lines.push("Here are our products right now:");
+    lines.push("*Product Catalog*");
+    lines.push("Here are the available products right now:");
   } else {
-    lines.push(`Here are our services right now:`);
+    lines.push("*Service Catalog*");
+    lines.push("Here are the available services right now:");
   }
 
   lines.push("");
-  lines.push(itemType === "product" ? "*Products*" : "*Services*");
-  if (!visibleItems.length) {
-    lines.push("- None available right now");
-  } else {
-    visibleItems.forEach((item) => lines.push(buildCatalogReplyLine(item, itemType)));
-  }
+  lines.push(
+    ...buildCatalogSectionLines({
+      items: visibleItems,
+      title: "",
+      itemType,
+      maxItems: limit,
+    })
+  );
 
   lines.push("");
   if (hasMore) {
     if (language === "hi") {
-      lines.push("Aur dekhna hai? *yes* reply karein.");
+      lines.push("Aur options dekhne hain? *yes* reply karein.");
     } else if (language === "hinglish") {
-      lines.push("Aur dekhna hai? *yes* reply karein.");
+      lines.push("Aur options dekhne hain? *yes* reply karein.");
     } else {
-      lines.push("Want to see more? Reply *yes*.");
+      lines.push("Want to see more options? Reply *yes*.");
     }
   } else if (language === "hi") {
-    lines.push("Aap price, details, booking, delivery ya full catalog ke liye pooch sakte hain.");
+    lines.push("Aap item ka naam bhejkar price, details, booking, delivery ya full catalog pooch sakte hain.");
   } else if (language === "hinglish") {
-    lines.push("Aap price, details, booking, delivery ya full catalog ke liye pooch sakte hain.");
+    lines.push("Aap item ka naam bhejkar price, details, booking, delivery ya full catalog pooch sakte hain.");
   } else {
-    lines.push("Ask me for price, details, booking, delivery, or the full catalog.");
+    lines.push("Reply with any item name for price, details, booking, delivery, or the full catalog.");
   }
 
   return {
@@ -659,13 +687,60 @@ export const buildCatalogAvailabilityReply = ({
   languageCode = "en",
 } = {}) => {
   const language = ["hi", "hinglish"].includes(languageCode) ? languageCode : "en";
+  const normalizedRequestedName = normalizeComparableText(requestedName)
+    .replace(/[^\p{L}\p{N}\s]+/gu, " ")
+    .trim();
+  const genericBrowseWords = new Set([
+    "all",
+    "full",
+    "sabhi",
+    "sare",
+    "saare",
+    "pura",
+    "poora",
+    "product",
+    "products",
+    "service",
+    "services",
+    "item",
+    "items",
+    "catalog",
+    "menu",
+    "show",
+    "list",
+    "dikha",
+    "dikhao",
+    "dikhaiye",
+    "available",
+    "mujhe",
+    "mujko",
+    "mujhko",
+    "mereko",
+    "merko",
+    "kya",
+    "aap",
+    "hai",
+    "hain",
+    "ho",
+    "sakte",
+    "sakta",
+    "sakti",
+  ]);
+  const requestedTokens = normalizedRequestedName
+    .split(/\s+/)
+    .map((word) => word.trim())
+    .filter((word) => word.length > 1);
+  const meaningfulRequestedTokens = requestedTokens.filter(
+    (word) => !genericBrowseWords.has(word)
+  );
   const safeRequestedName =
-    sanitizeText(requestedName, 120) ||
-    (itemType === "product"
-      ? "that product"
-      : itemType === "service"
-        ? "that service"
-        : "that item");
+    meaningfulRequestedTokens.length > 0
+      ? sanitizeText(requestedName, 120)
+      : itemType === "product"
+        ? "those products"
+        : itemType === "service"
+          ? "those services"
+          : "that item";
 
   if (matchedItem) {
     const name = sanitizeText(matchedItem?.name || matchedItem?.label, 120) || "Selected item";
@@ -678,13 +753,15 @@ export const buildCatalogAvailabilityReply = ({
     const lines = [];
 
     if (language === "hi") {
-      lines.push(`जी हां, हम *${name}* offer करते हैं।`);
+      lines.push(`जी हां, *${name}* available है।`);
     } else if (language === "hinglish") {
-      lines.push(`Ji haan, ham *${name}* offer karte hain.`);
+      lines.push(`Ji haan, *${name}* available hai.`);
     } else {
-      lines.push(`Yes, we do offer *${name}*.`);
+      lines.push(`Yes, *${name}* is available.`);
     }
 
+    lines.push("");
+    lines.push(`*${name}*`);
     if (category) lines.push(`*Category:* ${category}`);
     if (description) lines.push(`*Details:* ${description}`);
     if (itemType === "service" && durationLabel) lines.push(`*Duration:* ${durationLabel}`);
@@ -693,11 +770,11 @@ export const buildCatalogAvailabilityReply = ({
     if (prompt) lines.push(`*Info Needed:* ${prompt}`);
 
     if (language === "hi") {
-      lines.push("अगर आप चाहें तो मैं इसकी और details ya next step में help कर सकता हूँ।");
+      lines.push("अगर आप चाहें तो मैं booking, details ya next step में help कर सकता हूँ।");
     } else if (language === "hinglish") {
-      lines.push("Agar aap chahen to main iski aur details ya next step mein help kar sakta hoon.");
+      lines.push("Agar aap chahen to main booking, details ya next step mein help kar sakta hoon.");
     } else {
-      lines.push("If you want, I can share more details or help with the next step.");
+      lines.push("If you want, I can help with booking, details, or the next step.");
     }
 
     return lines.join("\n");
@@ -709,28 +786,66 @@ export const buildCatalogAvailabilityReply = ({
       : itemType === "service"
         ? catalog?.services || []
         : [...(catalog?.services || []), ...(catalog?.products || [])];
-  const previewLine = buildCatalogAvailabilityPreview({
-    items: previewItems,
-    itemType,
-  });
   const lines = [];
 
   if (language === "hi") {
-    lines.push(`माफ कीजिए, फिलहाल हम *${safeRequestedName}* offer नहीं करते।`);
+    lines.push(`माफ कीजिए, अभी *${safeRequestedName}* available नहीं है।`);
   } else if (language === "hinglish") {
-    lines.push(`Sorry, फिलहाल ham *${safeRequestedName}* offer nahin karte.`);
+    lines.push(`Sorry, abhi *${safeRequestedName}* available nahin hai.`);
   } else {
-    lines.push(`Sorry, we do not currently offer *${safeRequestedName}*.`);
+    lines.push(`Sorry, *${safeRequestedName}* is not available right now.`);
   }
 
-  if (previewLine) lines.push(previewLine);
+  if (previewItems.length) {
+    lines.push("");
+    if (itemType === "product" || itemType === "service") {
+      lines.push(
+        itemType === "product"
+          ? "*Available products right now*"
+          : "*Available services right now*"
+      );
+      lines.push(
+        ...buildCatalogSectionLines({
+          items: previewItems,
+          title: "",
+          itemType,
+          maxItems: 4,
+        })
+      );
+    } else {
+      lines.push("*Available options right now*");
+      if ((catalog?.products || []).length) {
+        lines.push("");
+        lines.push(
+          ...buildCatalogSectionLines({
+            items: catalog?.products || [],
+            title: "*Products*",
+            itemType: "product",
+            maxItems: 3,
+          })
+        );
+      }
+      if ((catalog?.services || []).length) {
+        lines.push("");
+        lines.push(
+          ...buildCatalogSectionLines({
+            items: catalog?.services || [],
+            title: "*Services*",
+            itemType: "service",
+            maxItems: 3,
+          })
+        );
+      }
+    }
+  }
 
+  lines.push("");
   if (language === "hi") {
-    lines.push("अगर आप चाहें तो मैं हमारे available options की details share कर सकता हूँ।");
+    lines.push("अगर आप चाहें तो अपनी requirement ya budget बताइए, मैं closest option suggest कर दूँगा।");
   } else if (language === "hinglish") {
-    lines.push("Agar aap chahen to main hamare available options ki details share kar sakta hoon.");
+    lines.push("Agar aap chahen to apni requirement ya budget batayein, main closest option suggest kar dunga.");
   } else {
-    lines.push("If you want, I can share the available options we do have.");
+    lines.push("If you want, tell me your requirement or budget and I will suggest the closest option.");
   }
 
   return lines.join("\n");
@@ -752,21 +867,32 @@ export const buildCatalogGreetingPreview = ({
   }
 
   lines.push("");
-  lines.push("Here are a few things we offer right now:");
+  lines.push("*Quick Catalog Preview*");
+  lines.push("Here are a few things available right now:");
 
   if (products.length) {
     lines.push("");
-    lines.push("Products:");
-    products.forEach((item) => lines.push(buildGreetingPreviewLine(item, "product")));
+    lines.push("*Products*");
+    lines.push(...buildCatalogSectionLines({
+      items: products,
+      title: "",
+      itemType: "product",
+      maxItems: maxItemsPerType,
+    }));
   }
 
   if (services.length) {
     lines.push("");
-    lines.push("Services:");
-    services.forEach((item) => lines.push(buildGreetingPreviewLine(item, "service")));
+    lines.push("*Services*");
+    lines.push(...buildCatalogSectionLines({
+      items: services,
+      title: "",
+      itemType: "service",
+      maxItems: maxItemsPerType,
+    }));
   }
 
   lines.push("");
-  lines.push("Ask me for price, details, booking, delivery, or the full catalog.");
+  lines.push("You can reply with *all products*, *all services*, *price*, *details*, *booking*, or *delivery*.");
   return lines.join("\n");
 };

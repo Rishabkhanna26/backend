@@ -27,7 +27,10 @@ export async function GET() {
             a.service_label,
             a.product_label,
             a.dashboard_subscription_expires_at,
-            s.charge_enabled,
+            CASE
+              WHEN a.admin_tier = 'super_admin' THEN TRUE
+              ELSE COALESCE(s.charge_enabled, FALSE)
+            END AS charge_enabled,
             s.free_until,
             s.input_price_usd_per_1m,
             s.output_price_usd_per_1m,

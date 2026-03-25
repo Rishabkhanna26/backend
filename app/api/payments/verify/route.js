@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { requireAuth } from '../../../../lib/auth-server';
+import { getSessionUser } from '../../../../lib/auth-server';
 import {
   getEffectiveRazorpayCredentials,
   getAdminPaymentLink,
@@ -31,7 +31,7 @@ const parseNoteBoolean = (value) => {
 
 export async function POST(request) {
   try {
-    await requireAuth();
+    const user = await getSessionUser();
     const body = await request.json();
     const paymentLinkId = String(body?.payment_link_id || '').trim();
     if (!paymentLinkId) {
@@ -42,6 +42,18 @@ export async function POST(request) {
     }
 
     const existingLink = await getAdminPaymentLink(paymentLinkId);
+    if (!existingLink) {
+      return NextResponse.json(
+        { success: false, error: 'Payment link not found.' },
+        { status: 404 }
+      );
+    }
+    if (user && user.admin_tier !== 'super_admin' && existingLink.admin_id !== user.id) {
+      return NextResponse.json(
+        { success: false, error: 'Forbidden' },
+        { status: 403 }
+      );
+    }
     const collectorCreds = (await getEffectiveRazorpayCredentials(existingLink?.admin_id)) || {};
     if (!isRazorpayConfigured(collectorCreds)) {
       return NextResponse.json(
@@ -56,17 +68,18 @@ export async function POST(request) {
     });
 
     const status = verification?.verified ? 'paid' : normalizeStatus(verification?.linkStatus);
-    await updateAdminPaymentLinkStatus({
+    const updatedRows = await updateAdminPaymentLinkStatus({
       paymentLinkId,
       status,
       paidAmount: verification?.paidAmount || 0,
       paidAt: verification?.paidAt || null,
       rawJson: verification?.raw || null,
+      onlyIfNotPaid: status === 'paid',
     });
+    const transitionedToPaid = status === 'paid' && Number(updatedRows || 0) > 0;
 
     if (
-      status === 'paid' &&
-      existingLink?.status !== 'paid' &&
+      transitionedToPaid &&
       existingLink?.purpose === 'prepaid'
     ) {
       await creditAdminPaidTokens({
@@ -77,8 +90,7 @@ export async function POST(request) {
     }
 
     if (
-      status === 'paid' &&
-      existingLink?.status !== 'paid' &&
+      transitionedToPaid &&
       existingLink?.purpose === 'dashboard'
     ) {
       await extendAdminDashboardSubscription({
@@ -88,7 +100,10 @@ export async function POST(request) {
       const notes = verification?.raw?.link?.notes || {};
       const normalizedType = normalizeBusinessType(notes?.profile_type, null);
       const bookingFromNotes = parseNoteBoolean(notes?.booking_enabled);
-      const updates = {};
+      const updates = {
+        status: 'active',
+        access_expires_at: null,
+      };
       if (normalizedType) {
         updates.business_type = normalizedType;
       }
@@ -107,8 +122,7 @@ export async function POST(request) {
     }
 
     if (
-      status === 'paid' &&
-      existingLink?.status !== 'paid' &&
+      transitionedToPaid &&
       existingLink?.purpose === 'business_type_change'
     ) {
       await markBusinessTypeChangeRequestPaid({
@@ -128,9 +142,6 @@ export async function POST(request) {
       },
     });
   } catch (error) {
-    if (error.status === 401) {
-      return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
-    }
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });
   }
 }

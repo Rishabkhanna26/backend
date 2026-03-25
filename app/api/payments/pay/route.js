@@ -45,6 +45,14 @@ export async function POST() {
   try {
     const user = await requireAuth();
     const settings = await getAdminBillingSettings(user.id);
+    const tokenSystemEnabled =
+      user.admin_tier === 'super_admin' || settings?.charge_enabled === true;
+    if (!tokenSystemEnabled) {
+      return NextResponse.json(
+        { success: false, error: 'Token billing is disabled for your account.' },
+        { status: 403 }
+      );
+    }
     const usage = await getAdminPaygUsageSummary(user.id);
     const payments = await getAdminPaymentTotals(user.id, { purpose: 'payg' });
 

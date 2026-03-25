@@ -71,8 +71,10 @@ export async function GET() {
     const maintenanceTotals = computeMaintenanceTotals({ baseInr: totalDue });
 
     const freeUntil = settings?.free_until ? new Date(settings.free_until) : null;
+    const tokenSystemEnabled =
+      user.admin_tier === 'super_admin' || settings?.charge_enabled === true;
     const isFreeBySetting =
-      settings?.charge_enabled === false ||
+      !tokenSystemEnabled ||
       (freeUntil && !Number.isNaN(freeUntil.getTime()) && freeUntil > new Date());
     const freeInputRemaining = Number(tokenBalances?.free_input_tokens || 0);
     const freeOutputRemaining = Number(tokenBalances?.free_output_tokens || 0);
@@ -116,10 +118,13 @@ export async function GET() {
     return NextResponse.json({
       success: true,
       data: {
-        charge_enabled: settings?.charge_enabled !== false,
+        token_system_enabled: tokenSystemEnabled,
+        charge_enabled: tokenSystemEnabled,
         free_until: freeUntil ? freeUntil.toISOString() : null,
         is_free: Boolean(isFree),
-        billing_state: isFreeBySetting
+        billing_state: !tokenSystemEnabled
+          ? 'disabled'
+          : isFreeBySetting
           ? 'free'
           : hasFree
           ? 'free'

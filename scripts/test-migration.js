@@ -16,7 +16,7 @@ import pg from 'pg';
 import dotenv from 'dotenv';
 import logger from '../config/logger.js';
 
-dotenv.config();
+dotenv.config({ quiet: true });
 
 const { Pool } = pg;
 

@@ -164,6 +164,24 @@ const adminProfileCache = new Map();
 const ADMIN_CATALOG_TTL_MS = Number(process.env.ADMIN_CATALOG_TTL_MS || 60_000);
 const adminCatalogCache = new Map();
 
+const toCacheVersionToken = (value) => {
+  if (!value) return "";
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value);
+  return date.toISOString();
+};
+
+const buildCatalogCacheVersion = (items = []) => {
+  let latestUpdatedAt = "";
+  items.forEach((item) => {
+    const nextToken = toCacheVersionToken(item?.updated_at);
+    if (nextToken && (!latestUpdatedAt || nextToken > latestUpdatedAt)) {
+      latestUpdatedAt = nextToken;
+    }
+  });
+  return `${items.length}:${latestUpdatedAt}`;
+};
+
 const getMessageKey = (message) => {
   const serialized = message?.id?._serialized || message?.id?.id;
   if (serialized) return serialized;
@@ -306,7 +324,21 @@ const getAdminAutomationProfile = async (adminId) => {
   const cached = adminProfileCache.get(adminId);
   const now = Date.now();
   if (cached && now - cached.at < ADMIN_PROFILE_TTL_MS) {
-    return cached.data;
+    try {
+      const [metaRows] = await db.query(
+        `SELECT updated_at
+         FROM admins
+         WHERE id = ?
+         LIMIT 1`,
+        [adminId]
+      );
+      const nextVersion = toCacheVersionToken(metaRows?.[0]?.updated_at);
+      if (nextVersion === cached.version) {
+        return cached.data;
+      }
+    } catch (_error) {
+      return cached.data;
+    }
   }
   let rows;
   try {
@@ -314,9 +346,9 @@ const getAdminAutomationProfile = async (adminId) => {
       `SELECT business_name, business_type, business_category,
               business_address, business_hours, business_map_url,
               automation_enabled, booking_enabled,
-              free_delivery_enabled, free_delivery_min_amount, free_delivery_scope,
+              free_delivery_enabled, free_delivery_min_amount, free_delivery_scope, free_delivery_product_rules,
               whatsapp_service_limit, whatsapp_product_limit,
-              whatsapp_name, whatsapp_number, email, phone
+              whatsapp_name, whatsapp_number, email, phone, updated_at
        FROM admins
        WHERE id = ?
        LIMIT 1`,
@@ -347,12 +379,14 @@ const getAdminAutomationProfile = async (adminId) => {
       free_delivery_enabled: false,
       free_delivery_min_amount: null,
       free_delivery_scope: "combined",
+      free_delivery_product_rules: [],
       whatsapp_service_limit: 3,
       whatsapp_product_limit: 3,
       whatsapp_name: null,
       whatsapp_number: null,
       email: null,
       phone: null,
+      updated_at: null,
     };
   if (typeof data.automation_enabled !== "boolean") {
     data.automation_enabled = true;
@@ -367,9 +401,14 @@ const getAdminAutomationProfile = async (adminId) => {
     data.free_delivery_min_amount = null;
   }
   data.free_delivery_scope = normalizeFreeDeliveryScope(data.free_delivery_scope);
+  data.free_delivery_product_rules = normalizeFreeDeliveryProductRules(data.free_delivery_product_rules);
   data.whatsapp_service_limit = normalizeWhatsappCatalogLimit(data.whatsapp_service_limit, 3);
   data.whatsapp_product_limit = normalizeWhatsappCatalogLimit(data.whatsapp_product_limit, 3);
-  adminProfileCache.set(adminId, { at: now, data });
+  adminProfileCache.set(adminId, {
+    at: now,
+    data,
+    version: toCacheVersionToken(data.updated_at),
+  });
   return data;
 };
 
@@ -907,13 +946,144 @@ const getEligibleFreeDeliverySubtotal = (user) => {
 const normalizeFreeDeliveryScope = (value) =>
   String(value || "").trim().toLowerCase() === "eligible_only" ? "eligible_only" : "combined";
 
+const normalizeFreeDeliveryProductRules = (value) => {
+  const list = Array.isArray(value)
+    ? value
+    : typeof value === "string"
+    ? (() => {
+        try {
+          const parsed = JSON.parse(value);
+          return Array.isArray(parsed) ? parsed : [];
+        } catch {
+          return [];
+        }
+      })()
+    : [];
+
+  const seen = new Set();
+  const rules = [];
+  list.forEach((entry) => {
+    const productId = Math.trunc(
+      Number(
+        entry?.catalog_item_id ?? entry?.catalogItemId ?? entry?.product_id ?? entry?.productId
+      )
+    );
+    const minAmount = Number(entry?.min_amount ?? entry?.minAmount);
+    if (!Number.isFinite(productId) || productId <= 0) return;
+    if (!Number.isFinite(minAmount) || minAmount <= 0) return;
+    if (seen.has(productId)) return;
+    seen.add(productId);
+    rules.push({
+      catalog_item_id: productId,
+      min_amount: Number(minAmount.toFixed(2)),
+      product_name: sanitizeText(
+        entry?.product_name ?? entry?.productName ?? entry?.name ?? "",
+        160
+      ),
+    });
+  });
+  return rules;
+};
+
 const buildOrderFreeDeliveryContext = ({ user, adminProfile }) => {
   const enabled = adminProfile?.free_delivery_enabled === true;
-  const threshold = Number(adminProfile?.free_delivery_min_amount);
-  if (!enabled || !Number.isFinite(threshold) || threshold <= 0) {
+  if (!enabled) {
     return { enabled: false };
   }
   const scope = normalizeFreeDeliveryScope(adminProfile?.free_delivery_scope);
+  const threshold = Number(adminProfile?.free_delivery_min_amount);
+  const productRules = normalizeFreeDeliveryProductRules(
+    adminProfile?.free_delivery_product_rules
+  );
+
+  if (scope === "eligible_only" && productRules.length > 0) {
+    const orderItems = getOrderItems(user);
+    const ruleByProductId = new Map(
+      productRules.map((rule) => [String(rule.catalog_item_id), rule])
+    );
+    const productSubtotals = new Map();
+
+    orderItems.forEach((item) => {
+      if (item?.itemType !== "product" || item?.freeDeliveryEligible !== true) return;
+      const productId = Math.trunc(Number(item?.id));
+      if (!Number.isFinite(productId) || productId <= 0) return;
+      const rule = ruleByProductId.get(String(productId));
+      if (!rule) return;
+      const itemTotal = computeOrderItemTotal(item);
+      if (!Number.isFinite(itemTotal) || itemTotal <= 0) return;
+      const current = productSubtotals.get(String(productId)) || 0;
+      productSubtotals.set(String(productId), Number((current + itemTotal).toFixed(2)));
+    });
+
+    let qualifyingRule = null;
+    let nearestRule = null;
+    let nearestRemaining = null;
+
+    productRules.forEach((rule) => {
+      const subtotal = productSubtotals.get(String(rule.catalog_item_id)) || 0;
+      if (subtotal >= rule.min_amount) {
+        if (!qualifyingRule || rule.min_amount < qualifyingRule.min_amount) {
+          qualifyingRule = rule;
+        }
+        return;
+      }
+      if (subtotal <= 0) return;
+      const remaining = Number((rule.min_amount - subtotal).toFixed(2));
+      if (remaining <= 0) return;
+      if (nearestRemaining === null || remaining < nearestRemaining) {
+        nearestRemaining = remaining;
+        nearestRule = rule;
+      }
+    });
+
+    if (qualifyingRule) {
+      return {
+        enabled: true,
+        scope,
+        mode: "product_rules",
+        qualifies: true,
+        eligible: true,
+        threshold: qualifyingRule.min_amount,
+        total: qualifyingRule.min_amount,
+        remaining: 0,
+        matched_product_id: qualifyingRule.catalog_item_id,
+        matched_product_name: qualifyingRule.product_name || "",
+      };
+    }
+
+    if (nearestRule && Number.isFinite(nearestRemaining)) {
+      return {
+        enabled: true,
+        scope,
+        mode: "product_rules",
+        qualifies: false,
+        eligible: true,
+        threshold: nearestRule.min_amount,
+        total: Number((nearestRule.min_amount - nearestRemaining).toFixed(2)),
+        remaining: nearestRemaining,
+        matched_product_id: nearestRule.catalog_item_id,
+        matched_product_name: nearestRule.product_name || "",
+      };
+    }
+
+    return {
+      enabled: true,
+      scope,
+      mode: "product_rules",
+      qualifies: false,
+      eligible: false,
+      threshold: productRules[0]?.min_amount || null,
+      total: 0,
+      remaining: productRules[0]?.min_amount || null,
+      matched_product_id: null,
+      matched_product_name: "",
+    };
+  }
+
+  if (!Number.isFinite(threshold) || threshold <= 0) {
+    return { enabled: false };
+  }
+
   const total =
     scope === "eligible_only" ? getEligibleFreeDeliverySubtotal(user) : getOrderTotalAmount(user);
   const hasEligibleProducts = getOrderItems(user).some(
@@ -956,6 +1126,22 @@ const updateOrderFreeDeliveryContext = ({ user, adminProfile }) => {
 
 const buildFreeDeliveryMessage = (context) => {
   if (!context?.enabled) return "";
+  if (context.mode === "product_rules") {
+    if (context.eligible === false) {
+      return "Free delivery works only on selected marked products.";
+    }
+    if (context.qualifies) {
+      return `🎁 Free delivery unlocked${
+        context.matched_product_name ? ` for ${context.matched_product_name}` : ""
+      } above ${formatCurrencyAmount(context.threshold, RAZORPAY_CURRENCY)}.`;
+    }
+    return `Add ${formatCurrencyAmount(
+      context.remaining,
+      RAZORPAY_CURRENCY
+    )} more${
+      context.matched_product_name ? ` on ${context.matched_product_name}` : " on a selected product"
+    } to unlock free delivery.`;
+  }
   if (context.scope === "eligible_only" && context.eligible === false) {
     return "Free delivery is available only on products marked by the admin.";
   }
@@ -1183,14 +1369,28 @@ const getAdminCatalogItems = async (adminId) => {
   const cached = adminCatalogCache.get(adminId);
   const now = Date.now();
   if (cached && now - cached.at < ADMIN_CATALOG_TTL_MS) {
-    return cached.data;
+    try {
+      const [metaRows] = await db.query(
+        `SELECT COUNT(*)::int AS total_items, MAX(updated_at) AS updated_at
+         FROM catalog_items
+         WHERE admin_id = ?`,
+        [adminId]
+      );
+      const meta = metaRows?.[0] || {};
+      const nextVersion = `${Number(meta.total_items) || 0}:${toCacheVersionToken(meta.updated_at)}`;
+      if (nextVersion === cached.version) {
+        return cached.data;
+      }
+    } catch (_error) {
+      return cached.data;
+    }
   }
 
   try {
     let rows;
     try {
       [rows] = await db.query(
-        `SELECT id, item_type, name, category, description, price_label, duration_value, duration_unit, duration_minutes, quantity_value, quantity_unit, details_prompt, keywords, is_active, sort_order, is_bookable, is_booking_item, payment_required, free_delivery_eligible, show_on_whatsapp, whatsapp_sort_order
+        `SELECT id, item_type, name, category, description, price_label, duration_value, duration_unit, duration_minutes, quantity_value, quantity_unit, details_prompt, keywords, is_active, sort_order, is_bookable, is_booking_item, payment_required, free_delivery_eligible, show_on_whatsapp, whatsapp_sort_order, updated_at
          FROM catalog_items
          WHERE admin_id = ?
          ORDER BY sort_order ASC, name ASC, id ASC`,
@@ -1216,6 +1416,7 @@ const getAdminCatalogItems = async (adminId) => {
         free_delivery_eligible: false,
         show_on_whatsapp: true,
         whatsapp_sort_order: row.sort_order ?? 0,
+        updated_at: null,
       }));
     }
 
@@ -1225,12 +1426,16 @@ const getAdminCatalogItems = async (adminId) => {
     const products = active.filter((row) => row.item_type === "product");
 
     const data = { services, products, hasCatalog };
-    adminCatalogCache.set(adminId, { at: now, data });
+    adminCatalogCache.set(adminId, {
+      at: now,
+      data,
+      version: buildCatalogCacheVersion(rows),
+    });
     return data;
   } catch (error) {
     console.error("❌ Failed to load admin catalog:", error.message);
     const data = { services: [], products: [], hasCatalog: false };
-    adminCatalogCache.set(adminId, { at: now, data });
+    adminCatalogCache.set(adminId, { at: now, data, version: "0:" });
     return data;
   }
 };
@@ -1241,12 +1446,45 @@ const sortCatalogItemsForWhatsapp = (items = []) =>
     const whatsappOrderB = Number(b?.whatsapp_sort_order ?? 0);
     const orderA = Number(a?.sort_order ?? 0);
     const orderB = Number(b?.sort_order ?? 0);
-    const effectiveA = whatsappOrderA > 0 ? whatsappOrderA : orderA;
-    const effectiveB = whatsappOrderB > 0 ? whatsappOrderB : orderB;
-    if (effectiveA !== effectiveB) return effectiveA - effectiveB;
+    const featuredA = whatsappOrderA > 0;
+    const featuredB = whatsappOrderB > 0;
+    if (featuredA !== featuredB) return featuredA ? -1 : 1;
+    if (featuredA && whatsappOrderA !== whatsappOrderB) return whatsappOrderA - whatsappOrderB;
     if (orderA !== orderB) return orderA - orderB;
     return String(a?.name || "").localeCompare(String(b?.name || ""));
   });
+
+const buildCatalogHighlightLines = ({ catalog, serviceLabel }) => {
+  const featuredServices = (catalog?.services || [])
+    .filter((item) => Number(item?.whatsapp_sort_order ?? 0) > 0)
+    .slice(0, 2);
+  const featuredProducts = (catalog?.products || [])
+    .filter((item) => Number(item?.whatsapp_sort_order ?? 0) > 0)
+    .slice(0, 2);
+
+  if (!featuredServices.length && !featuredProducts.length) {
+    return [];
+  }
+
+  const lines = ["Top picks right now:"];
+  if (featuredServices.length) {
+    lines.push(
+      `${serviceLabel}: ${featuredServices
+        .map((item) => sanitizeText(item?.name || "", 80))
+        .filter(Boolean)
+        .join(", ")}`
+    );
+  }
+  if (featuredProducts.length) {
+    lines.push(
+      `Products: ${featuredProducts
+        .map((item) => sanitizeText(item?.name || "", 80))
+        .filter(Boolean)
+        .join(", ")}`
+    );
+  }
+  return lines;
+};
 
 const buildWhatsappCatalogView = ({ catalog, adminProfile }) => {
   const serviceLimit = normalizeWhatsappCatalogLimit(adminProfile?.whatsapp_service_limit, 3);
@@ -1371,6 +1609,7 @@ const buildCatalogAutomation = ({ baseAutomation, catalog }) => {
   const productChoice = mainMenuChoices.find((choice) => choice.id === "PRODUCTS");
   const trackOrderChoice = mainMenuChoices.find((choice) => choice.id === "TRACK_ORDER");
   const executiveChoice = mainMenuChoices.find((choice) => choice.id === "EXECUTIVE");
+  const highlightLines = buildCatalogHighlightLines({ catalog, serviceLabel });
 
   nextAutomation.mainMenuChoices = mainMenuChoices;
   nextAutomation.supportsServices = Boolean(serviceChoice);
@@ -1383,6 +1622,7 @@ const buildCatalogAutomation = ({ baseAutomation, catalog }) => {
     productLabel,
     execLabel,
     menuChoices: mainMenuChoices,
+    highlights: highlightLines,
   });
   nextAutomation.returningMenuText = (name) =>
     buildReturningMenuText(
@@ -1391,6 +1631,7 @@ const buildCatalogAutomation = ({ baseAutomation, catalog }) => {
         productLabel,
         execLabel,
         menuChoices: mainMenuChoices,
+        highlights: highlightLines,
       },
       name
     );
@@ -1614,10 +1855,14 @@ const CATALOG_REQUEST_KEYWORDS = [
 ];
 const CATALOG_LIST_HINTS = [
   "show",
+  "show me",
   "list",
   "available",
   "catalog",
   "menu",
+  "full catalog",
+  "pura catalog",
+  "poora catalog",
   "what do you have",
   "which products",
   "which services",
@@ -1629,10 +1874,17 @@ const CATALOG_LIST_HINTS = [
   "or products",
   "aur products",
   "baki products",
+  "sabhi product",
   "sabhi products",
+  "sare product",
   "sare products",
   "all products",
+  "all product",
+  "all service",
+  "all services",
   "dikhao",
+  "dikha do",
+  "dikha sakte",
   "batao",
   "bataiye",
   "dikhaiye",
@@ -1877,6 +2129,8 @@ const OFFERING_REQUEST_STOP_WORDS = new Set([
   "muje",
   "mujhko",
   "mujko",
+  "mereko",
+  "merko",
   "hai",
   "hain",
   "ho",
@@ -1910,6 +2164,20 @@ const OFFERING_REQUEST_STOP_WORDS = new Set([
   "information",
   "show",
   "list",
+  "sabhi",
+  "sare",
+  "saare",
+  "all",
+  "full",
+  "pura",
+  "poora",
+  "dikha",
+  "dikhao",
+  "dikhaiye",
+  "dikhaye",
+  "sakte",
+  "sakta",
+  "sakti",
   "which",
   "what",
   "kaunsa",
@@ -2153,15 +2421,27 @@ const detectCatalogListIntent = ({ input, catalog, fallbackScope = null }) => {
       "other products",
       "other product",
       "other services",
+      "all product",
       "all products",
+      "all service",
       "all services",
+      "sabhi product",
       "aur products",
       "or products",
       "baki products",
       "sabhi products",
+      "sare product",
       "sare products",
+      "sabhi service",
       "aur services",
       "baki services",
+      "show me products",
+      "show me product",
+      "dikha sakte",
+      "dikha do",
+      "full catalog",
+      "pura catalog",
+      "poora catalog",
     ]);
 
   if (!wantsList) return null;
@@ -2368,6 +2648,47 @@ const findBestSpecificCatalogMatch = ({ input, automation }) => {
 const hasDirectTransactionIntent = (input) =>
   textHasAny(normalizeComparableText(input), DIRECT_TRANSACTION_HINTS);
 
+const GENERIC_CATALOG_BROWSE_WORDS = new Set([
+  "product",
+  "products",
+  "service",
+  "services",
+  "item",
+  "items",
+  "catalog",
+  "menu",
+  "show",
+  "list",
+  "available",
+  "all",
+  "full",
+  "sabhi",
+  "sare",
+  "saare",
+  "pura",
+  "poora",
+  "dikha",
+  "dikhao",
+  "dikhaiye",
+  "dikhaye",
+  "dekhao",
+  "sakta",
+  "sakte",
+  "sakti",
+  "mereko",
+  "merko",
+]);
+
+const isGenericCatalogBrowseRequest = ({ input, requestedWords = [] }) => {
+  const normalized = normalizeComparableText(input);
+  if (!normalized) return false;
+  const meaningfulWords = requestedWords.filter(
+    (word) => word && !GENERIC_CATALOG_BROWSE_WORDS.has(word)
+  );
+  if (meaningfulWords.length > 0) return false;
+  return hasAnyHint(normalized, CATALOG_LIST_HINTS);
+};
+
 const extractOfferingAvailabilityRequest = ({ input, catalog, fallbackScope = null }) => {
   const normalized = normalizeComparableText(input);
   if (!normalized) return null;
@@ -2413,6 +2734,7 @@ const extractOfferingAvailabilityRequest = ({ input, catalog, fallbackScope = nu
     .filter((word) => !OFFERING_REQUEST_STOP_WORDS.has(word));
 
   if (!requestedWords.length) return null;
+  if (isGenericCatalogBrowseRequest({ input: normalized, requestedWords })) return null;
 
   return {
     requestedLabel: requestedWords.slice(0, 6).join(" "),
@@ -3332,6 +3654,7 @@ const buildMainMenuText = ({
   productLabel,
   execLabel,
   menuChoices = null,
+  highlights = [],
 }) => {
   const resolvedChoices =
     menuChoices ||
@@ -3344,6 +3667,7 @@ const buildMainMenuText = ({
     `Hi 👋 Welcome to ${brandName || "Our Store"}`,
     "",
     "What would you like to do today?",
+    ...(highlights.length ? ["", ...highlights] : []),
     "",
     ...buildMainMenuLines(resolvedChoices),
     "",
@@ -3352,7 +3676,7 @@ const buildMainMenuText = ({
 };
 
 const buildReturningMenuText = (
-  { serviceLabel, productLabel, execLabel, menuChoices = null },
+  { serviceLabel, productLabel, execLabel, menuChoices = null, highlights = [] },
   name
 ) => {
   const resolvedChoices =
@@ -3366,6 +3690,7 @@ const buildReturningMenuText = (
     `Welcome back ${name} 👋`,
     "",
     "How can I help you today?",
+    ...(highlights.length ? ["", ...highlights] : []),
     "",
     ...buildMainMenuLines(resolvedChoices),
     "",

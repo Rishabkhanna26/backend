@@ -109,10 +109,11 @@ describe("buildCatalogGreetingPreview", () => {
     });
 
     expect(preview).toContain("Hi! Welcome to Demo Marble House.");
-    expect(preview).toContain("Products:");
-    expect(preview).toContain("Italian Marble Slab");
-    expect(preview).toContain("Services:");
-    expect(preview).toContain("Granite Polishing");
+    expect(preview).toContain("*Quick Catalog Preview*");
+    expect(preview).toContain("*Products*");
+    expect(preview).toContain("1. *Italian Marble Slab*");
+    expect(preview).toContain("*Services*");
+    expect(preview).toContain("1. *Granite Polishing*");
   });
 });
 
@@ -150,10 +151,11 @@ describe("buildCatalogListReply", () => {
       },
     });
 
-    expect(reply).toContain("Ji haan, hamare products filhaal yeh hain:");
-    expect(reply).toContain("*Products*");
-    expect(reply).toContain("*Starter Pack*");
-    expect(reply).toContain("*Wellness Kit*");
+    expect(reply).toContain("*Product Catalog*");
+    expect(reply).toContain("Yeh products abhi available hain:");
+    expect(reply).toContain("1. *Starter Pack*");
+    expect(reply).toContain("2. *Wellness Kit*");
+    expect(reply).toContain("Price: ₹ 1,499 | Pack: 1 pack");
     expect(reply).not.toContain("Reply with product number");
   });
 });
@@ -194,7 +196,8 @@ describe("buildCatalogAvailabilityReply", () => {
       },
     });
 
-    expect(reply).toContain("Yes, we do offer *Initial Consultation*.");
+    expect(reply).toContain("Yes, *Initial Consultation* is available.");
+    expect(reply).toContain("*Initial Consultation*");
     expect(reply).toContain("*Duration:* 30 minutes");
     expect(reply).toContain("*Price:* ₹ 499");
     expect(reply).toContain("*Info Needed:* Share your preferred date and time.");
@@ -214,7 +217,9 @@ describe("buildCatalogAvailabilityReply", () => {
       },
     });
 
-    expect(reply).toContain("do not currently offer *hair cut*");
-    expect(reply).toContain("*Available services:* Initial Consultation, Follow-up Visit");
+    expect(reply).toContain("*hair cut* is not available right now");
+    expect(reply).toContain("*Available services right now*");
+    expect(reply).toContain("1. *Initial Consultation*");
+    expect(reply).toContain("2. *Follow-up Visit*");
   });
 });

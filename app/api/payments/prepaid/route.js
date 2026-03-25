@@ -61,6 +61,14 @@ export async function POST(request) {
     }
 
     const settings = await getAdminBillingSettings(user.id);
+    const tokenSystemEnabled =
+      user.admin_tier === 'super_admin' || settings?.charge_enabled === true;
+    if (!tokenSystemEnabled) {
+      return NextResponse.json(
+        { success: false, error: 'Token billing is disabled for your account.' },
+        { status: 403 }
+      );
+    }
     const inputUsdPer1M = Number(settings?.input_price_usd_per_1m ?? DEFAULT_INPUT_USD_PER_1M);
     const outputUsdPer1M = Number(settings?.output_price_usd_per_1m ?? DEFAULT_OUTPUT_USD_PER_1M);
     const usdToInr = DEFAULT_USD_TO_INR_RATE;

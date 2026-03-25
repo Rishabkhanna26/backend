@@ -1,7 +1,7 @@
 import dotenv from 'dotenv';
 import logger from '../../config/logger.js';
 
-dotenv.config();
+dotenv.config({ quiet: true });
 
 /**
  * Persistence Configuration Module

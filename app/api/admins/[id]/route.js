@@ -6,6 +6,7 @@ import {
   getAdminById,
   getPendingBusinessTypeChangeRequest,
   rejectBusinessTypeChangeRequest,
+  upsertAdminBillingSettings,
   updateAdminAccess,
 } from '../../../../lib/db-helpers';
 
@@ -29,6 +30,8 @@ export async function PATCH(req, context) {
     const business_category = body?.business_category;
     const booking_enabled =
       typeof body?.booking_enabled === 'boolean' ? body.booking_enabled : undefined;
+    const token_system_enabled =
+      typeof body?.token_system_enabled === 'boolean' ? body.token_system_enabled : undefined;
     const access_duration_value = Number(body?.access_duration_value || 0);
     const access_duration_unit =
       String(body?.access_duration_unit || 'days').toLowerCase() === 'months'
@@ -167,7 +170,7 @@ export async function PATCH(req, context) {
       }
     }
 
-    const updated = await updateAdminAccess(adminId, {
+    let updated = await updateAdminAccess(adminId, {
       admin_tier,
       status: effectiveStatus,
       business_type: approvedRequest ? undefined : business_type,
@@ -178,6 +181,19 @@ export async function PATCH(req, context) {
     if (!updated) {
       return Response.json({ success: false, error: 'Admin not found' }, { status: 404 });
     }
+
+    const nextTokenSystemEnabled =
+      updated.admin_tier === 'super_admin'
+        ? true
+        : typeof token_system_enabled === 'boolean'
+        ? token_system_enabled
+        : undefined;
+
+    if (typeof nextTokenSystemEnabled === 'boolean') {
+      await upsertAdminBillingSettings(adminId, { charge_enabled: nextTokenSystemEnabled });
+      updated = await updateAdminAccess(adminId, {});
+    }
+
     return Response.json({ success: true, data: updated });
   } catch (error) {
     if (error.status === 401) {
